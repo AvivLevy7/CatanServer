@@ -1,0 +1,25 @@
+@import 'tailwindcss';
+
+/* Tailwind v4 is CSS-first: tokens declared here generate utilities such as
+   `fill-catan-forest`, `bg-catan-desert`, etc. No tailwind.config.js needed. */
+@theme {
+  --color-catan-forest: #2f6b3a;
+  --color-catan-pasture: #8fca6b;
+  --color-catan-fields: #e3b23c;
+  --color-catan-hills: #b5651d;
+  --color-catan-mountains: #7d7d8a;
+  --color-catan-desert: #e6d9a2;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
+
+#root {
+  min-height: 100svh;
+}
