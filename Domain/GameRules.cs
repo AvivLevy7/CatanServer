@@ -6,6 +6,21 @@ namespace CatanServer.Domain;
 /// </summary>
 public sealed class GameRuleException(string message) : InvalidOperationException(message);
 
+/// <summary>Per-player piece supply from the standard box.</summary>
+public static class PieceLimits
+{
+    public const int Roads = 15;
+    public const int Settlements = 5;
+    public const int Cities = 4;
+}
+
+/// <summary>Exchange rates with the bank.</summary>
+public static class TradeRates
+{
+    /// <summary>Resources given per one received when no harbour applies.</summary>
+    public const int Bank = 4;
+}
+
 /// <summary>Standard building costs.</summary>
 public static class BuildingCosts
 {

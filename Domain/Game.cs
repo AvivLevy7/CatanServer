@@ -4,7 +4,9 @@ public enum GamePhase
 {
     SetupRound1,
     SetupRound2,
-    MainGame
+    MainGame,
+    WaitingForDiscards,
+    MovingRobber
 }
 
 /// <summary>What the current player must do next during setup.</summary>
@@ -22,12 +24,19 @@ public enum SetupStep
 /// </summary>
 public sealed class Game
 {
+    /// <summary>Hand size above which a 7 forces a discard of half (rounded down).</summary>
+    public const int DiscardThreshold = 7;
+
     private readonly List<Player> _players;
     private readonly Random _random;
     private int _currentTurnIndex;
 
     // Setup bookkeeping: the settlement just placed, awaiting its adjoining road.
     private NodeId? _pendingSetupSettlement;
+
+    // Robber bookkeeping: who still owes cards after a 7, and who rolled it.
+    private readonly Dictionary<Guid, int> _pendingDiscards = [];
+    private Guid? _robberMover;
 
     public Game(Guid id, BoardGraph board, IReadOnlyList<Player> players, Random? random = null)
     {
@@ -45,13 +54,21 @@ public sealed class Game
 
     public GamePhase Phase { get; private set; } = GamePhase.SetupRound1;
 
-    public bool IsSetup => Phase != GamePhase.MainGame;
+    public bool IsSetup => Phase is GamePhase.SetupRound1 or GamePhase.SetupRound2;
+
+    public Hex RobberHex => Board.Hexes.First(hex => hex.HasRobber);
+
+    /// <summary>Players who must still discard, with the number of cards each owes.</summary>
+    public IReadOnlyDictionary<Guid, int> PendingDiscards => _pendingDiscards;
+
+    /// <summary>The player who rolled the 7 and will move the robber once discards are done.</summary>
+    public Guid? RobberMover => _robberMover;
 
     public SetupStep SetupStep => Phase switch
     {
-        GamePhase.MainGame => SetupStep.None,
-        _ when _pendingSetupSettlement is null => SetupStep.PlaceSettlement,
-        _ => SetupStep.PlaceRoad
+        GamePhase.SetupRound1 or GamePhase.SetupRound2 when _pendingSetupSettlement is null => SetupStep.PlaceSettlement,
+        GamePhase.SetupRound1 or GamePhase.SetupRound2 => SetupStep.PlaceRoad,
+        _ => SetupStep.None
     };
 
     /// <summary>The settlement the current player must attach their setup road to.</summary>
@@ -77,6 +94,20 @@ public sealed class Game
         _players.FirstOrDefault(player => player.Id == playerId)
         ?? throw new KeyNotFoundException($"Player {playerId} is not in this game.");
 
+    public int RoadsBuilt(Guid playerId) => Board.Edges.Count(edge => edge.OwnerId == playerId);
+
+    public int SettlementsBuilt(Guid playerId) =>
+        Board.Nodes.Count(node => node.OwnerId == playerId && node.Building == BuildingType.Settlement);
+
+    public int CitiesBuilt(Guid playerId) =>
+        Board.Nodes.Count(node => node.OwnerId == playerId && node.Building == BuildingType.City);
+
+    public int RoadsRemaining(Guid playerId) => PieceLimits.Roads - RoadsBuilt(playerId);
+
+    public int SettlementsRemaining(Guid playerId) => PieceLimits.Settlements - SettlementsBuilt(playerId);
+
+    public int CitiesRemaining(Guid playerId) => PieceLimits.Cities - CitiesBuilt(playerId);
+
     /// <summary>
     /// Setup phase: places a free settlement for the current player. The distance rule
     /// applies. In round 2 the player immediately collects one resource per adjacent hex.
@@ -85,6 +116,7 @@ public sealed class Game
     {
         RequireTurn(playerId);
         RequireSetupStep(SetupStep.PlaceSettlement, "Place your road first.");
+        RequireSettlementSupply(playerId);
 
         var node = RequireVacantNodeRespectingDistance(nodeId);
         var player = GetPlayer(playerId);
@@ -119,6 +151,7 @@ public sealed class Game
     {
         RequireTurn(playerId);
         RequireSetupStep(SetupStep.PlaceRoad, "Place your settlement first.");
+        RequireRoadSupply(playerId);
 
         if (!Board.TryGetEdge(edgeId, out var edge))
         {
@@ -149,6 +182,7 @@ public sealed class Game
     {
         RequireMainGame();
         RequireTurn(playerId);
+        RequireSettlementSupply(playerId);
 
         var node = RequireVacantNodeRespectingDistance(nodeId);
 
@@ -169,6 +203,68 @@ public sealed class Game
     }
 
     /// <summary>
+    /// 4:1 maritime trade with the bank. The current player gives four of one resource
+    /// and receives one of another. Harbour discounts are not applied yet.
+    /// </summary>
+    public void TradeWithBank(Guid playerId, ResourceType give, ResourceType receive)
+    {
+        RequireMainGame();
+        RequireTurn(playerId);
+
+        if (give == receive)
+        {
+            throw new GameRuleException("Choose two different resources to trade.");
+        }
+
+        var player = GetPlayer(playerId);
+        if (player.Resources[give] < TradeRates.Bank)
+        {
+            throw new GameRuleException($"You need {TradeRates.Bank} {give} to trade with the bank.");
+        }
+
+        player.Pay(new Dictionary<ResourceType, int> { [give] = TradeRates.Bank });
+        player.AddResources(receive, 1);
+    }
+
+    /// <summary>
+    /// Upgrades one of the current player's settlements to a city. Costs 3 Ore + 2 Wheat,
+    /// grants +1 VP (settlement 1 -> city 2) and returns the settlement piece to supply.
+    /// </summary>
+    public void BuildCity(Guid playerId, NodeId nodeId)
+    {
+        RequireMainGame();
+        RequireTurn(playerId);
+
+        if (!Board.TryGetNode(nodeId, out var node))
+        {
+            throw new GameRuleException("That intersection is not on the board.");
+        }
+
+        if (node.OwnerId != playerId || node.Building != BuildingType.Settlement)
+        {
+            throw new GameRuleException("You can only upgrade one of your own settlements.");
+        }
+
+        if (CitiesRemaining(playerId) <= 0)
+        {
+            throw new GameRuleException($"You have used all {PieceLimits.Cities} of your cities.");
+        }
+
+        var player = GetPlayer(playerId);
+        if (!player.CanAfford(BuildingCosts.City))
+        {
+            throw new GameRuleException("A city costs 3 Ore and 2 Wheat.");
+        }
+
+        player.Pay(BuildingCosts.City);
+        node.Occupy(playerId, BuildingType.City);
+
+        var gained = new Building(nodeId, playerId, BuildingType.City).VictoryPoints
+                   - new Building(nodeId, playerId, BuildingType.Settlement).VictoryPoints;
+        player.AwardVictoryPoints(gained);
+    }
+
+    /// <summary>
     /// Builds a road for the current player. The edge must be empty and connect to one
     /// of the player's existing roads or buildings, without passing through an
     /// opponent's building at the shared intersection.
@@ -177,6 +273,7 @@ public sealed class Game
     {
         RequireMainGame();
         RequireTurn(playerId);
+        RequireRoadSupply(playerId);
 
         if (!Board.TryGetEdge(edgeId, out var edge))
         {
@@ -281,13 +378,155 @@ public sealed class Game
         var roll = DiceRoll.Roll(_random);
         LastRoll = roll;
 
-        var production = roll.ActivatesRobber
-            ? []
-            : DistributeResources(roll.Total);
+        if (roll.ActivatesRobber)
+        {
+            BeginRobberSequence(roller);
+            return new RollOutcome(roller, roll, []);
+        }
 
+        var production = DistributeResources(roll.Total);
         AdvanceTurn();
 
         return new RollOutcome(roller, roll, production);
+    }
+
+    /// <summary>
+    /// Removes the given cards from a player who owes a discard. When everyone has
+    /// discarded, the phase moves on to <see cref="GamePhase.MovingRobber"/>.
+    /// </summary>
+    public void DiscardCards(Guid playerId, IReadOnlyDictionary<ResourceType, int> cards)
+    {
+        if (Phase != GamePhase.WaitingForDiscards)
+        {
+            throw new GameRuleException("Nobody needs to discard right now.");
+        }
+
+        if (!_pendingDiscards.TryGetValue(playerId, out var owed))
+        {
+            throw new GameRuleException("You do not need to discard.");
+        }
+
+        if (cards.Values.Any(amount => amount < 0))
+        {
+            throw new GameRuleException("Discard amounts cannot be negative.");
+        }
+
+        var total = cards.Values.Sum();
+        if (total != owed)
+        {
+            throw new GameRuleException($"You must discard exactly {owed} cards.");
+        }
+
+        var player = GetPlayer(playerId);
+        if (!player.CanAfford(cards))
+        {
+            throw new GameRuleException("You do not hold those cards.");
+        }
+
+        player.Pay(cards);
+        _pendingDiscards.Remove(playerId);
+
+        if (_pendingDiscards.Count == 0)
+        {
+            Phase = GamePhase.MovingRobber;
+        }
+    }
+
+    /// <summary>
+    /// Moves the robber to a new hex and steals one random card from an adjacent
+    /// opponent (if any). Resumes the main game and passes the turn.
+    /// </summary>
+    public ResourceGrant? MoveRobber(Guid playerId, AxialCoordinate target, Guid? victimId)
+    {
+        if (Phase != GamePhase.MovingRobber)
+        {
+            throw new GameRuleException("The robber cannot be moved right now.");
+        }
+
+        if (playerId != _robberMover)
+        {
+            throw new GameRuleException("Only the player who rolled the 7 may move the robber.");
+        }
+
+        var hex = Board.GetHex(target)
+            ?? throw new GameRuleException("That tile is not on the board.");
+
+        if (hex.HasRobber)
+        {
+            throw new GameRuleException("The robber must move to a different tile.");
+        }
+
+        var candidates = StealCandidates(hex, playerId);
+
+        ResourceGrant? stolen = null;
+        if (candidates.Count > 0)
+        {
+            if (victimId is null)
+            {
+                throw new GameRuleException("Choose a player to steal from.");
+            }
+
+            if (!candidates.Contains(victimId.Value))
+            {
+                throw new GameRuleException("That player has no building next to that tile.");
+            }
+
+            stolen = StealRandomCard(from: GetPlayer(victimId.Value), to: GetPlayer(playerId));
+        }
+
+        RobberHex.HasRobber = false;
+        hex.HasRobber = true;
+
+        _robberMover = null;
+        Phase = GamePhase.MainGame;
+        AdvanceTurn();
+
+        return stolen;
+    }
+
+    /// <summary>Opponents with a building on <paramref name="hex"/> who hold at least one card.</summary>
+    public IReadOnlyCollection<Guid> StealCandidates(Hex hex, Guid thief) =>
+        hex.Nodes
+            .Select(Board.GetNode)
+            .Where(node => node.IsOccupied && node.OwnerId != thief)
+            .Select(node => node.OwnerId!.Value)
+            .Distinct()
+            .Where(id => GetPlayer(id).TotalResourceCount > 0)
+            .ToArray();
+
+    private void BeginRobberSequence(Guid roller)
+    {
+        _robberMover = roller;
+        _pendingDiscards.Clear();
+
+        foreach (var player in _players)
+        {
+            var hand = player.TotalResourceCount;
+            if (hand > DiscardThreshold)
+            {
+                _pendingDiscards[player.Id] = hand / 2;
+            }
+        }
+
+        Phase = _pendingDiscards.Count > 0 ? GamePhase.WaitingForDiscards : GamePhase.MovingRobber;
+    }
+
+    private ResourceGrant? StealRandomCard(Player from, Player to)
+    {
+        // Weight by count so each physical card is equally likely.
+        var pool = from.Resources
+            .SelectMany(pair => Enumerable.Repeat(pair.Key, pair.Value))
+            .ToArray();
+
+        if (pool.Length == 0)
+        {
+            return null;
+        }
+
+        var resource = pool[_random.Next(pool.Length)];
+        from.Pay(new Dictionary<ResourceType, int> { [resource] = 1 });
+        to.AddResources(resource, 1);
+        return new ResourceGrant(to.Id, resource, 1);
     }
 
     public Player EndTurn()
@@ -339,9 +578,30 @@ public sealed class Game
 
     private void RequireMainGame()
     {
-        if (IsSetup)
+        if (Phase != GamePhase.MainGame)
         {
-            throw new GameRuleException("Finish the setup phase first.");
+            throw new GameRuleException(Phase switch
+            {
+                GamePhase.WaitingForDiscards => "Waiting for players to discard.",
+                GamePhase.MovingRobber => "The robber must be moved first.",
+                _ => "Finish the setup phase first."
+            });
+        }
+    }
+
+    private void RequireRoadSupply(Guid playerId)
+    {
+        if (RoadsRemaining(playerId) <= 0)
+        {
+            throw new GameRuleException($"You have used all {PieceLimits.Roads} of your roads.");
+        }
+    }
+
+    private void RequireSettlementSupply(Guid playerId)
+    {
+        if (SettlementsRemaining(playerId) <= 0)
+        {
+            throw new GameRuleException($"You have used all {PieceLimits.Settlements} of your settlements.");
         }
     }
 

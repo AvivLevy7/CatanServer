@@ -13,7 +13,7 @@ const TERRAIN_FILL = {
   Desert: 'fill-catan-desert',
 };
 
-export default function HexTile({ tile, isSelected, onSelect }) {
+export default function HexTile({ tile, isSelected, onSelect, robberMode = false }) {
   const { type, numberToken, hasRobber } = tile;
 
   const { x, y } = hexCenter(tile);
@@ -21,14 +21,21 @@ export default function HexTile({ tile, isSelected, onSelect }) {
   // 6 and 8 are the highest-probability rolls and are traditionally printed in red.
   const isHighProbability = numberToken === 6 || numberToken === 8;
 
+  // In robber mode the current robber tile is not a valid destination.
+  const isRobberTarget = robberMode && !hasRobber;
+
   return (
     <g
       transform={`translate(${x}, ${y})`}
       onClick={() => onSelect?.(tile)}
-      className="group cursor-pointer outline-none"
+      className={`group outline-none ${
+        robberMode ? (isRobberTarget ? 'cursor-crosshair' : 'cursor-not-allowed') : 'cursor-pointer'
+      }`}
       role="button"
       tabIndex={0}
-      aria-label={`${type}${numberToken ? `, token ${numberToken}` : ''}`}
+      aria-label={`${type}${numberToken ? `, token ${numberToken}` : ''}${hasRobber ? ', robber here' : ''}${
+        isRobberTarget ? ', click to move robber here' : ''
+      }`}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -41,7 +48,7 @@ export default function HexTile({ tile, isSelected, onSelect }) {
         points={POINTS}
         className={`${TERRAIN_FILL[type] ?? 'fill-slate-400'} [transform-box:fill-box] origin-center stroke-amber-950/70 stroke-2 transition-all duration-200 ease-out group-hover:scale-105 group-hover:brightness-115 group-focus-visible:brightness-115 ${
           isSelected ? 'stroke-[5] stroke-white brightness-110' : ''
-        }`}
+        } ${isRobberTarget ? 'group-hover:stroke-[5] group-hover:stroke-stone-900' : ''}`}
       />
 
       {numberToken != null && (
@@ -63,11 +70,10 @@ export default function HexTile({ tile, isSelected, onSelect }) {
       )}
 
       {hasRobber && (
-        <circle
-          cy={HEX_SIZE * 0.08}
-          r={HEX_SIZE * 0.2}
-          className="pointer-events-none fill-stone-900/85"
-        />
+        <g className="pointer-events-none" transform={`translate(0, ${HEX_SIZE * 0.52})`}>
+          <circle r={HEX_SIZE * 0.2} className="fill-stone-900/90 stroke-stone-100/80 stroke-2 drop-shadow" />
+          <circle cy={-HEX_SIZE * 0.06} r={HEX_SIZE * 0.08} className="fill-stone-600" />
+        </g>
       )}
     </g>
   );

@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import Board from './components/Board';
 import DicePanel from './components/DicePanel';
+import DiscardModal from './components/DiscardModal';
 import PhaseBanner from './components/PhaseBanner';
 import PlayerPanel from './components/PlayerPanel';
+import StealPicker from './components/StealPicker';
+import TradePanel from './components/TradePanel';
 import { useGameHub } from './useGameHub';
 
 const RESOURCE_LABELS = {
@@ -58,20 +61,30 @@ export default function App() {
     rollDice,
     buildSettlement,
     buildRoad,
+    buildCity,
+    tradeWithBank,
+    discardCards,
+    moveRobber,
+    getStealCandidates,
     placeInitialSettlement,
     placeInitialRoad,
     startGame,
   } = useGameHub();
   const [selected, setSelected] = useState(null);
   const [playerCount, setPlayerCount] = useState(4);
+  // Robber destination awaiting a steal-target choice.
+  const [pendingRobber, setPendingRobber] = useState(null);
 
   // Hold the loading screen until the first BoardState arrives from the hub.
   if (!board) {
     return <StatusScreen status={status} error={error} />;
   }
 
+  // GameState carries the freshest board (with node/edge ownership and robber); BoardState is the fallback.
+  const liveBoard = game?.board ?? board;
+
   // The server DTO already carries row/col/rowLength, so no client-side maths.
-  const tiles = board.hexes.map((hex) => ({
+  const tiles = liveBoard.hexes.map((hex) => ({
     id: hex.id,
     row: hex.row,
     col: hex.col,
@@ -89,18 +102,30 @@ export default function App() {
   const rolledBy = players.find((p) => p.id === lastRoll?.rolledBy) ?? null;
   const isLive = status === 'connected';
 
-  // GameState carries the freshest board (with node/edge ownership); BoardState is the fallback.
-  const liveBoard = game?.board ?? board;
   const playerColors = Object.fromEntries(players.map((p) => [p.id, p.color]));
 
-  const isSetup = game != null && game.phase !== 'MainGame';
+  const phase = game?.phase ?? 'SetupRound1';
+  const isSetup = phase === 'SetupRound1' || phase === 'SetupRound2';
+  const isDiscarding = phase === 'WaitingForDiscards';
+  const isMovingRobber = phase === 'MovingRobber';
+  const isMainGame = phase === 'MainGame';
+
+  // Hot-seat: walk owing players one at a time, in seat order.
+  const pendingDiscards = game?.pendingDiscards ?? {};
+  const discardingPlayer = players.find((p) => pendingDiscards[p.id] != null) ?? null;
+  const robberMover = players.find((p) => p.id === game?.robberMoverId) ?? null;
 
   const handleNodeClick = (node) => {
-    if (node.building !== 'None') return;
     if (isSetup) {
-      placeInitialSettlement(node.id);
-    } else {
+      if (node.building === 'None') placeInitialSettlement(node.id);
+      return;
+    }
+    if (!isMainGame) return;
+
+    if (node.building === 'None') {
       buildSettlement(node.id);
+    } else if (node.building === 'Settlement' && node.ownerId === currentTurnPlayerId) {
+      buildCity(node.id);
     }
   };
 
@@ -108,14 +133,39 @@ export default function App() {
     if (edge.ownerId != null) return;
     if (isSetup) {
       placeInitialRoad(edge.id);
-    } else {
+    } else if (isMainGame) {
       buildRoad(edge.id);
     }
+  };
+
+  const handleTileSelect = async (tile) => {
+    if (!isMovingRobber) {
+      setSelected(tile);
+      return;
+    }
+
+    if (tile.hasRobber) return;
+
+    const candidateIds = await getStealCandidates(tile.id);
+    if (candidateIds.length === 0) {
+      moveRobber(tile.id, null);
+    } else if (candidateIds.length === 1) {
+      moveRobber(tile.id, candidateIds[0]);
+    } else {
+      setPendingRobber({ hexId: tile.id, candidateIds });
+    }
+  };
+
+  const handleStealPick = async (victimId) => {
+    const { hexId } = pendingRobber;
+    setPendingRobber(null);
+    await moveRobber(hexId, victimId);
   };
 
   const handleNewGame = () => {
     startGame(playerCount);
     setSelected(null);
+    setPendingRobber(null);
   };
 
   return (
@@ -161,10 +211,12 @@ export default function App() {
             edges={liveBoard.edges ?? []}
             playerColors={playerColors}
             selectedId={selected?.id}
-            onTileSelect={setSelected}
+            onTileSelect={handleTileSelect}
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
             highlightNodeId={isSetup ? game?.pendingSetupSettlementNodeId ?? null : null}
+            upgradablePlayerId={isMainGame ? currentTurnPlayerId : null}
+            robberMode={isMovingRobber}
           />
 
           <div className="flex flex-wrap items-center justify-center gap-3">
@@ -198,14 +250,21 @@ export default function App() {
         </section>
 
         <aside className="flex flex-col gap-4">
-          <PhaseBanner game={game} currentPlayer={currentPlayer} />
+          <PhaseBanner game={game} currentPlayer={currentPlayer} robberMover={robberMover} />
           <DicePanel
             roll={roll}
             currentPlayer={currentPlayer}
             rolledBy={rolledBy}
             onRoll={rollDice}
-            disabled={!isLive || !game || isSetup}
+            disabled={!isLive || !isMainGame}
           />
+          {isMainGame && (
+            <TradePanel
+              player={currentPlayer}
+              onTrade={tradeWithBank}
+              disabled={!isLive}
+            />
+          )}
           {game ? (
             <PlayerPanel players={players} currentTurnPlayerId={currentTurnPlayerId} />
           ) : (
@@ -213,6 +272,24 @@ export default function App() {
           )}
         </aside>
       </div>
+
+      {isDiscarding && discardingPlayer && (
+        <DiscardModal
+          player={discardingPlayer}
+          owed={pendingDiscards[discardingPlayer.id]}
+          onDiscard={discardCards}
+          disabled={!isLive}
+        />
+      )}
+
+      {pendingRobber && (
+        <StealPicker
+          candidates={players.filter((p) => pendingRobber.candidateIds.includes(p.id))}
+          onPick={handleStealPick}
+          onCancel={() => setPendingRobber(null)}
+          disabled={!isLive}
+        />
+      )}
     </main>
   );
 }

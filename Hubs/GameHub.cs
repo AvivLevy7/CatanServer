@@ -119,6 +119,56 @@ public sealed class GameHub : Hub<IGameClient>
     public Task BuildRoad(string edgeId) =>
         ApplyMove("BuildRoad", edgeId, () => _gameState.BuildRoad(edgeId));
 
+    public Task BuildCity(string nodeId) =>
+        ApplyMove("BuildCity", nodeId, () => _gameState.BuildCity(nodeId));
+
+    public Task TradeWithBank(string resourceToGive, string resourceToReceive) =>
+        ApplyMove("TradeWithBank", $"{resourceToGive}->{resourceToReceive}",
+            () => _gameState.TradeWithBank(resourceToGive, resourceToReceive));
+
+    /// <summary>
+    /// A player discards the cards they owe after a 7. There is no connection-to-player
+    /// mapping yet, so the discarding player is identified explicitly.
+    /// </summary>
+    public Task DiscardCards(Guid playerId, Dictionary<string, int> resourcesToDrop) =>
+        ApplyMove("DiscardCards", playerId.ToString(), () => _gameState.DiscardCards(playerId, resourcesToDrop));
+
+    /// <summary>Returns which opponents could be robbed if the robber moved to <paramref name="hexId"/>.</summary>
+    public IReadOnlyList<Guid> GetStealCandidates(string hexId)
+    {
+        try
+        {
+            return _gameState.GetStealCandidates(hexId);
+        }
+        catch (GameRuleException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
+    /// <summary>Moves the robber and steals from <paramref name="targetPlayerId"/> (null/empty when nobody is adjacent).</summary>
+    public async Task MoveRobber(string hexId, string? targetPlayerId)
+    {
+        Guid? victim = Guid.TryParse(targetPlayerId, out var parsed) ? parsed : null;
+
+        (RobberMovedDto Event, GameStateDto State) result;
+        try
+        {
+            result = _gameState.MoveRobber(hexId, victim);
+        }
+        catch (GameRuleException ex)
+        {
+            _logger.LogInformation("Rejected MoveRobber to {HexId}: {Reason}", hexId, ex.Message);
+            throw new HubException(ex.Message);
+        }
+
+        _logger.LogInformation("Robber moved to {HexId}; stole {Resource} from {Victim}",
+            hexId, result.Event.StolenResource ?? "nothing", result.Event.VictimId);
+
+        await Clients.All.RobberMoved(result.Event);
+        await Clients.All.GameState(result.State);
+    }
+
     /// <summary>Setup phase: place a free settlement for the current player.</summary>
     public Task PlaceInitialSettlement(string nodeId) =>
         ApplyMove("PlaceInitialSettlement", nodeId, () => _gameState.PlaceInitialSettlement(nodeId));

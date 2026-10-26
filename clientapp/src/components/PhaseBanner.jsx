@@ -10,37 +10,48 @@ const ORDINAL = { SetupRound1: '1st', SetupRound2: '2nd' };
 /**
  * Prominent banner describing the current phase and what the active player must do.
  */
-export default function PhaseBanner({ game, currentPlayer }) {
+export default function PhaseBanner({ game, currentPlayer, robberMover }) {
   if (!game || !currentPlayer) return null;
 
-  const isSetup = game.phase !== 'MainGame';
-  const colorClass = PLAYER_TEXT[currentPlayer.color] ?? 'text-amber-50';
+  const isSetup = game.phase === 'SetupRound1' || game.phase === 'SetupRound2';
+  const isRobber = game.phase === 'WaitingForDiscards' || game.phase === 'MovingRobber';
+  const actor = isRobber && robberMover ? robberMover : currentPlayer;
+  const colorClass = PLAYER_TEXT[actor.color] ?? 'text-amber-50';
 
   let title;
   let instruction;
 
   if (isSetup) {
-    title = `Setup Phase &middot; Round ${game.phase === 'SetupRound1' ? 1 : 2}`;
+    title = `Setup Phase - Round ${game.phase === 'SetupRound1' ? 1 : 2}`;
     instruction =
       game.setupStep === 'PlaceRoad'
         ? 'place a road touching your new settlement'
         : `place your ${ORDINAL[game.phase]} settlement`;
+  } else if (game.phase === 'WaitingForDiscards') {
+    title = 'Robber! Discarding';
+    const owing = Object.keys(game.pendingDiscards ?? {}).length;
+    instruction = `wait while ${owing} player${owing === 1 ? '' : 's'} discard${owing === 1 ? 's' : ''} half their hand`;
+  } else if (game.phase === 'MovingRobber') {
+    title = 'Robber! Move it';
+    instruction = 'click a tile to move the robber and steal a card';
   } else {
     title = 'Main Game';
     instruction = game.lastRoll ? 'build, trade, or end your turn' : 'roll the dice';
   }
 
+  const highlight = isSetup || isRobber;
+
   return (
     <section
       aria-live="polite"
       className={`rounded-xl px-4 py-3 text-center shadow ${
-        isSetup ? 'bg-amber-200/90 text-stone-900' : 'bg-sky-800/70 text-amber-50'
+        highlight ? 'bg-amber-200/90 text-stone-900' : 'bg-sky-800/70 text-amber-50'
       }`}
     >
       <p className="text-xs font-semibold uppercase tracking-wide opacity-80">{title}</p>
       <p className="mt-0.5 text-base font-medium">
-        <span className={isSetup ? 'font-bold' : `font-bold ${colorClass}`}>
-          {currentPlayer.name} ({currentPlayer.color})
+        <span className={highlight ? 'font-bold' : `font-bold ${colorClass}`}>
+          {actor.name} ({actor.color})
         </span>
         , {instruction}.
       </p>

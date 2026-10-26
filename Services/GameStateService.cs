@@ -26,6 +26,21 @@ public interface IGameStateService
     /// <summary>Builds a road for the current player. Throws <see cref="GameRuleException"/> on an illegal move.</summary>
     GameStateDto BuildRoad(string edgeId);
 
+    /// <summary>Upgrades the current player's settlement to a city. Throws <see cref="GameRuleException"/> on an illegal move.</summary>
+    GameStateDto BuildCity(string nodeId);
+
+    /// <summary>4:1 bank trade for the current player. Throws <see cref="GameRuleException"/> on an illegal trade.</summary>
+    GameStateDto TradeWithBank(string resourceToGive, string resourceToReceive);
+
+    /// <summary>After a 7: a player discards the cards they owe.</summary>
+    GameStateDto DiscardCards(Guid playerId, IReadOnlyDictionary<string, int> cards);
+
+    /// <summary>After a 7: the roller moves the robber and optionally steals from an adjacent opponent.</summary>
+    (RobberMovedDto Event, GameStateDto State) MoveRobber(string hexId, Guid? victimId);
+
+    /// <summary>Opponents the current robber-mover could steal from if the robber landed on <paramref name="hexId"/>.</summary>
+    IReadOnlyList<Guid> GetStealCandidates(string hexId);
+
     /// <summary>Setup phase: free settlement for the current player.</summary>
     GameStateDto PlaceInitialSettlement(string nodeId);
 
@@ -159,6 +174,87 @@ public sealed class GameStateService : IGameStateService
         }
     }
 
+    public GameStateDto BuildCity(string nodeId)
+    {
+        lock (_gate)
+        {
+            var node = _game.Board.FindNode(nodeId)
+                ?? throw new GameRuleException("That intersection is not on the board.");
+
+            _game.BuildCity(_game.CurrentTurnPlayerId, node.Id);
+            return ProjectGame(_game);
+        }
+    }
+
+    public GameStateDto TradeWithBank(string resourceToGive, string resourceToReceive)
+    {
+        var give = ParseResource(resourceToGive);
+        var receive = ParseResource(resourceToReceive);
+
+        lock (_gate)
+        {
+            _game.TradeWithBank(_game.CurrentTurnPlayerId, give, receive);
+            return ProjectGame(_game);
+        }
+    }
+
+    private static ResourceType ParseResource(string name) =>
+        Enum.TryParse<ResourceType>(name, ignoreCase: true, out var resource)
+            ? resource
+            : throw new GameRuleException($"'{name}' is not a resource.");
+
+    public GameStateDto DiscardCards(Guid playerId, IReadOnlyDictionary<string, int> cards)
+    {
+        var parsed = cards
+            .Where(pair => pair.Value != 0)
+            .ToDictionary(pair => ParseResource(pair.Key), pair => pair.Value);
+
+        lock (_gate)
+        {
+            _game.DiscardCards(playerId, parsed);
+            return ProjectGame(_game);
+        }
+    }
+
+    public (RobberMovedDto Event, GameStateDto State) MoveRobber(string hexId, Guid? victimId)
+    {
+        var target = ParseHexId(hexId);
+
+        lock (_gate)
+        {
+            var mover = _game.RobberMover
+                ?? throw new GameRuleException("The robber cannot be moved right now.");
+
+            var stolen = _game.MoveRobber(mover, target, victimId);
+            var evt = new RobberMovedDto(mover, hexId, victimId, stolen?.Resource.ToString());
+            return (evt, ProjectGame(_game));
+        }
+    }
+
+    public IReadOnlyList<Guid> GetStealCandidates(string hexId)
+    {
+        var target = ParseHexId(hexId);
+
+        lock (_gate)
+        {
+            var mover = _game.RobberMover ?? _game.CurrentTurnPlayerId;
+            var hex = _game.Board.GetHex(target)
+                ?? throw new GameRuleException("That tile is not on the board.");
+            return _game.StealCandidates(hex, mover).ToList();
+        }
+    }
+
+    private static AxialCoordinate ParseHexId(string hexId)
+    {
+        var parts = hexId.Split(',');
+        if (parts.Length == 2 && int.TryParse(parts[0], out var q) && int.TryParse(parts[1], out var r))
+        {
+            return new AxialCoordinate(q, r);
+        }
+
+        throw new GameRuleException($"'{hexId}' is not a tile.");
+    }
+
     public GameStateDto PlaceInitialSettlement(string nodeId)
     {
         lock (_gate)
@@ -204,7 +300,10 @@ public sealed class GameStateService : IGameStateService
                 player.Name,
                 player.Color.ToString(),
                 player.VictoryPoints,
-                player.Resources.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value)))
+                player.Resources.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
+                game.RoadsRemaining(player.Id),
+                game.SettlementsRemaining(player.Id),
+                game.CitiesRemaining(player.Id)))
             .ToList();
 
         var buildings = game.Buildings
@@ -225,7 +324,10 @@ public sealed class GameStateService : IGameStateService
             game.LastRoll is { } roll ? ProjectRoll(roll) : null,
             game.Phase.ToString(),
             game.SetupStep.ToString(),
-            game.PendingSetupSettlement?.ToString());
+            game.PendingSetupSettlement?.ToString(),
+            $"{game.RobberHex.Coordinate.Q},{game.RobberHex.Coordinate.R}",
+            game.RobberMover,
+            game.PendingDiscards.ToDictionary(pair => pair.Key, pair => pair.Value));
     }
 
     private static DiceRolledDto ProjectRoll(RollOutcome outcome) =>

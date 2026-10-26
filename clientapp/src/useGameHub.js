@@ -10,6 +10,7 @@ const HUB_URL = import.meta.env.VITE_HUB_URL ?? '/hubs/game';
 const BOARD_STATE_EVENT = 'BoardState';
 const GAME_STATE_EVENT = 'GameState';
 const DICE_ROLLED_EVENT = 'DiceRolled';
+const ROBBER_MOVED_EVENT = 'RobberMoved';
 
 /**
  * Owns the SignalR connection and exposes the server-authoritative board and game state.
@@ -19,6 +20,7 @@ export function useGameHub() {
   const [board, setBoard] = useState(null);
   const [game, setGame] = useState(null);
   const [lastRoll, setLastRoll] = useState(null);
+  const [lastRobbery, setLastRobbery] = useState(null);
   const [status, setStatus] = useState('connecting');
   const [error, setError] = useState(null);
   const [actionError, setActionError] = useState(null);
@@ -52,6 +54,12 @@ export function useGameHub() {
     connection.on(DICE_ROLLED_EVENT, (roll) => {
       if (!cancelled) {
         setLastRoll(roll);
+      }
+    });
+
+    connection.on(ROBBER_MOVED_EVENT, (robbery) => {
+      if (!cancelled) {
+        setLastRobbery(robbery);
       }
     });
 
@@ -98,6 +106,7 @@ export function useGameHub() {
       connection.off(BOARD_STATE_EVENT);
       connection.off(GAME_STATE_EVENT);
       connection.off(DICE_ROLLED_EVENT);
+      connection.off(ROBBER_MOVED_EVENT);
       connection.stop();
       connectionRef.current = null;
     };
@@ -142,6 +151,29 @@ export function useGameHub() {
 
   const buildSettlement = useCallback((nodeId) => invokeMove('BuildSettlement', nodeId), [invokeMove]);
   const buildRoad = useCallback((edgeId) => invokeMove('BuildRoad', edgeId), [invokeMove]);
+  const buildCity = useCallback((nodeId) => invokeMove('BuildCity', nodeId), [invokeMove]);
+  const tradeWithBank = useCallback(
+    (give, receive) => invokeMove('TradeWithBank', give, receive),
+    [invokeMove],
+  );
+  const discardCards = useCallback(
+    (playerId, cards) => invokeMove('DiscardCards', playerId, cards),
+    [invokeMove],
+  );
+  const moveRobber = useCallback(
+    (hexId, targetPlayerId) => invokeMove('MoveRobber', hexId, targetPlayerId ?? null),
+    [invokeMove],
+  );
+  // Read-only query; returns [] on failure so the caller can fall back gracefully.
+  const getStealCandidates = useCallback(async (hexId) => {
+    const connection = connectionRef.current;
+    if (connection?.state !== HubConnectionState.Connected) return [];
+    try {
+      return await connection.invoke('GetStealCandidates', hexId);
+    } catch {
+      return [];
+    }
+  }, []);
   const placeInitialSettlement = useCallback(
     (nodeId) => invokeMove('PlaceInitialSettlement', nodeId),
     [invokeMove],
@@ -168,6 +200,12 @@ export function useGameHub() {
     endTurn,
     buildSettlement,
     buildRoad,
+    buildCity,
+    tradeWithBank,
+    discardCards,
+    moveRobber,
+    getStealCandidates,
+    lastRobbery,
     placeInitialSettlement,
     placeInitialRoad,
     startGame,

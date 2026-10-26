@@ -14,6 +14,8 @@ public interface IGameClient
 
     Task DiceRolled(DiceRolledDto roll);
 
+    Task RobberMoved(RobberMovedDto robber);
+
     Task PlayerJoined(string connectionId);
 
     Task PlayerLeft(string connectionId);

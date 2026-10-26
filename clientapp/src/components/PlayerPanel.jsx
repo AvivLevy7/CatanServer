@@ -50,6 +50,12 @@ function PlayerCard({ player, isCurrentTurn }) {
           </li>
         ))}
       </ul>
+
+      <p className="mt-2 flex justify-between text-[11px] text-sky-200" aria-label="Pieces remaining">
+        <span title="Roads left">Roads {player.roadsRemaining ?? '-'}</span>
+        <span title="Settlements left">Settlements {player.settlementsRemaining ?? '-'}</span>
+        <span title="Cities left">Cities {player.citiesRemaining ?? '-'}</span>
+      </p>
     </li>
   );
 }

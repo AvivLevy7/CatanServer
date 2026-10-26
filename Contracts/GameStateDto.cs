@@ -5,7 +5,10 @@ public sealed record PlayerDto(
     string Name,
     string Color,
     int VictoryPoints,
-    IReadOnlyDictionary<string, int> Resources);
+    IReadOnlyDictionary<string, int> Resources,
+    int RoadsRemaining,
+    int SettlementsRemaining,
+    int CitiesRemaining);
 
 public sealed record BuildingDto(string NodeId, Guid OwnerId, string Type);
 
@@ -24,7 +27,13 @@ public sealed record GameStateDto(
     DiceRollDto? LastRoll,
     string Phase,
     string SetupStep,
-    string? PendingSetupSettlementNodeId);
+    string? PendingSetupSettlementNodeId,
+    string RobberHexId,
+    Guid? RobberMoverId,
+    IReadOnlyDictionary<Guid, int> PendingDiscards);
+
+/// <summary>Broadcast when the robber steals so clients can show who lost what.</summary>
+public sealed record RobberMovedDto(Guid MovedBy, string HexId, Guid? VictimId, string? StolenResource);
 
 public sealed record ResourceGrantDto(Guid PlayerId, string Resource, int Amount);
 

@@ -22,6 +22,8 @@ export default function Board({
   onNodeClick,
   onEdgeClick,
   highlightNodeId = null,
+  upgradablePlayerId = null,
+  robberMode = false,
 }) {
   // Every node is anchored to a real hex corner, so its position is exactly the
   // same formula HexTile uses to draw that corner - no drift between layers.
@@ -51,11 +53,12 @@ export default function Board({
             tile={tile}
             isSelected={tile.id === selectedId}
             onSelect={onTileSelect}
+            robberMode={robberMode}
           />
         ))}
       </g>
 
-      <g aria-label="Paths">
+      <g aria-label="Paths" className={robberMode ? 'pointer-events-none' : undefined}>
         {edges.map((edge) => {
           const from = nodePositions.get(edge.nodeAId);
           const to = nodePositions.get(edge.nodeBId);
@@ -78,7 +81,7 @@ export default function Board({
         })}
       </g>
 
-      <g aria-label="Intersections">
+      <g aria-label="Intersections" className={robberMode ? 'pointer-events-none' : undefined}>
         {nodes.map((node) => {
           const pos = nodePositions.get(node.id);
           if (!pos) return null;
@@ -89,6 +92,11 @@ export default function Board({
               x={pos.x}
               y={pos.y}
               ownerColor={playerColors[node.ownerId]}
+              upgradable={
+                upgradablePlayerId != null &&
+                node.building === 'Settlement' &&
+                node.ownerId === upgradablePlayerId
+              }
               onClick={onNodeClick}
             />
           );
