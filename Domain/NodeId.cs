@@ -22,14 +22,15 @@ public readonly record struct NodeId
     public static NodeId FromCorner(AxialCoordinate hex, HexCorner corner)
     {
         // Each corner is shared by the hex itself and two of its six neighbours.
+        // Direction indices follow AxialCoordinate.Directions: 0=E, 1=NE, 2=NW, 3=W, 4=SW, 5=SE.
         var (first, second) = corner switch
         {
-            HexCorner.North => (5, 0),
-            HexCorner.NorthEast => (0, 1),
-            HexCorner.SouthEast => (1, 2),
-            HexCorner.South => (2, 3),
-            HexCorner.SouthWest => (3, 4),
-            HexCorner.NorthWest => (4, 5),
+            HexCorner.North => (2, 1),
+            HexCorner.NorthEast => (1, 0),
+            HexCorner.SouthEast => (0, 5),
+            HexCorner.South => (5, 4),
+            HexCorner.SouthWest => (4, 3),
+            HexCorner.NorthWest => (3, 2),
             _ => throw new ArgumentOutOfRangeException(nameof(corner))
         };
 

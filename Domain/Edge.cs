@@ -18,5 +18,13 @@ public sealed class Edge
 
     public NodeId Second { get; }
 
+    public Guid? OwnerId { get; private set; }
+
+    public bool HasRoad => OwnerId is not null;
+
     public NodeId Other(NodeId node) => node.Equals(First) ? Second : First;
+
+    internal void PlaceRoad(Guid ownerId) => OwnerId = ownerId;
+
+    internal void Clear() => OwnerId = null;
 }

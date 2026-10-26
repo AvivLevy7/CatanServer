@@ -28,6 +28,16 @@ public sealed class BoardGraph
 
     public Edge GetEdge(EdgeId id) => _edges[id];
 
+    public bool TryGetNode(NodeId id, out Node node) => _nodes.TryGetValue(id, out node!);
+
+    public bool TryGetEdge(EdgeId id, out Edge edge) => _edges.TryGetValue(id, out edge!);
+
+    /// <summary>Resolves a node from its <see cref="NodeId.ToString"/> form, as sent by clients.</summary>
+    public Node? FindNode(string id) => _nodes.Values.FirstOrDefault(node => node.Id.ToString() == id);
+
+    /// <summary>Resolves an edge from its <see cref="EdgeId.ToString"/> form, as sent by clients.</summary>
+    public Edge? FindEdge(string id) => _edges.Values.FirstOrDefault(edge => edge.Id.ToString() == id);
+
     /// <summary>Hexes that pay out when <paramref name="roll"/> is rolled.</summary>
     public IEnumerable<Hex> HexesWithToken(int roll) =>
         _hexes.Values.Where(hex => hex.NumberToken == roll);
@@ -43,9 +53,10 @@ public sealed class BoardGraph
 
             for (var i = 0; i < hexNodes.Length; i++)
             {
-                var current = GetOrAddNode(hexNodes[i]);
-                var nextId = hexNodes[(i + 1) % hexNodes.Length];
-                var next = GetOrAddNode(nextId);
+                var current = GetOrAddNode(hexNodes[i], hex.Coordinate, corners[i]);
+                var nextIndex = (i + 1) % hexNodes.Length;
+                var nextId = hexNodes[nextIndex];
+                var next = GetOrAddNode(nextId, hex.Coordinate, corners[nextIndex]);
 
                 current.LinkHex(hex.Coordinate);
                 current.LinkNeighbor(nextId);
@@ -66,11 +77,11 @@ public sealed class BoardGraph
         }
     }
 
-    private Node GetOrAddNode(NodeId id)
+    private Node GetOrAddNode(NodeId id, AxialCoordinate anchorHex, HexCorner anchorCorner)
     {
         if (!_nodes.TryGetValue(id, out var node))
         {
-            node = new Node(id);
+            node = new Node(id, anchorHex, anchorCorner);
             _nodes[id] = node;
         }
 

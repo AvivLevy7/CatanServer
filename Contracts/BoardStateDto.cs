@@ -17,5 +17,27 @@ public sealed record HexDto(
     public string Id => $"{Q},{R}";
 }
 
+/// <summary>
+/// Wire format for an intersection. AnchorHexId + AnchorCorner let the client place
+/// the node exactly on a hex corner using the same geometry it uses for tiles.
+/// </summary>
+public sealed record NodeDto(
+    string Id,
+    string AnchorHexId,
+    string AnchorCorner,
+    Guid? OwnerId,
+    string Building);
+
+/// <summary>Wire format for a path between two intersections.</summary>
+public sealed record EdgeDto(
+    string Id,
+    string NodeAId,
+    string NodeBId,
+    Guid? OwnerId);
+
 /// <summary>Full board snapshot pushed to clients.</summary>
-public sealed record BoardStateDto(Guid BoardId, IReadOnlyList<HexDto> Hexes);
+public sealed record BoardStateDto(
+    Guid BoardId,
+    IReadOnlyList<HexDto> Hexes,
+    IReadOnlyList<NodeDto> Nodes,
+    IReadOnlyList<EdgeDto> Edges);

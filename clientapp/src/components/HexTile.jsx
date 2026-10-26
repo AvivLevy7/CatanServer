@@ -1,16 +1,8 @@
-// Pointy-top hexagon geometry.
-// Pointy-top hexagon geometry.
-// For circumradius `size`: width = sqrt(3) * size, height = 2 * size.
-// Rows overlap vertically by 1/4 height, so vertical step = 1.5 * size.
-export const HEX_SIZE = 60;
-export const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
-export const VERTICAL_STEP = 1.5 * HEX_SIZE;
+import { HEX_SIZE, HEX_POINTS, hexCenter } from '../hexGeometry';
 
-// Corner points starting at the north vertex, going clockwise.
-const POINTS = Array.from({ length: 6 }, (_, i) => {
-  const angle = (Math.PI / 180) * (60 * i - 90);
-  return `${(HEX_SIZE * Math.cos(angle)).toFixed(3)},${(HEX_SIZE * Math.sin(angle)).toFixed(3)}`;
-}).join(' ');
+export { HEX_SIZE, HEX_WIDTH, VERTICAL_STEP } from '../hexGeometry';
+
+const POINTS = HEX_POINTS;
 
 const TERRAIN_FILL = {
   Forest: 'fill-catan-forest',
@@ -22,13 +14,9 @@ const TERRAIN_FILL = {
 };
 
 export default function HexTile({ tile, isSelected, onSelect }) {
-  const { row, col, rowLength, type, numberToken, hasRobber } = tile;
+  const { type, numberToken, hasRobber } = tile;
 
-  // Centre each row horizontally: rows of 3 are inset more than rows of 5.
-  const maxRowLength = 5;
-  const rowOffset = ((maxRowLength - rowLength) * HEX_WIDTH) / 2;
-  const x = rowOffset + col * HEX_WIDTH + HEX_WIDTH / 2;
-  const y = row * VERTICAL_STEP + HEX_SIZE;
+  const { x, y } = hexCenter(tile);
 
   // 6 and 8 are the highest-probability rolls and are traditionally printed in red.
   const isHighProbability = numberToken === 6 || numberToken === 8;

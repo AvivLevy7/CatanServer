@@ -6,17 +6,22 @@ import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/s
 // To bypass the proxy, set VITE_HUB_URL to e.g. https://localhost:7048/hubs/game
 const HUB_URL = import.meta.env.VITE_HUB_URL ?? '/hubs/game';
 
-// Server-to-client method defined by IGameClient on the C# side.
+// Server-to-client methods defined by IGameClient on the C# side.
 const BOARD_STATE_EVENT = 'BoardState';
+const GAME_STATE_EVENT = 'GameState';
+const DICE_ROLLED_EVENT = 'DiceRolled';
 
 /**
- * Owns the SignalR connection and exposes the server-authoritative board.
- * The hub pushes BoardState inside OnConnectedAsync, so no initial fetch is required.
+ * Owns the SignalR connection and exposes the server-authoritative board and game state.
+ * The hub pushes BoardState and GameState inside OnConnectedAsync, so no initial fetch is required.
  */
 export function useGameHub() {
   const [board, setBoard] = useState(null);
+  const [game, setGame] = useState(null);
+  const [lastRoll, setLastRoll] = useState(null);
   const [status, setStatus] = useState('connecting');
   const [error, setError] = useState(null);
+  const [actionError, setActionError] = useState(null);
   const connectionRef = useRef(null);
 
   useEffect(() => {
@@ -38,6 +43,18 @@ export function useGameHub() {
       }
     });
 
+    connection.on(GAME_STATE_EVENT, (nextGame) => {
+      if (!cancelled) {
+        setGame(nextGame);
+      }
+    });
+
+    connection.on(DICE_ROLLED_EVENT, (roll) => {
+      if (!cancelled) {
+        setLastRoll(roll);
+      }
+    });
+
     connection.onreconnecting(() => {
       if (!cancelled) setStatus('reconnecting');
     });
@@ -47,8 +64,14 @@ export function useGameHub() {
       setStatus('connected');
       // Re-sync: the board may have changed while we were away.
       try {
-        const latest = await connection.invoke('GetBoardState');
-        if (!cancelled) setBoard(latest);
+        const [latestBoard, latestGame] = await Promise.all([
+          connection.invoke('GetBoardState'),
+          connection.invoke('GetGameState'),
+        ]);
+        if (!cancelled) {
+          setBoard(latestBoard);
+          setGame(latestGame);
+        }
       } catch {
         /* the next push will correct us */
       }
@@ -73,6 +96,8 @@ export function useGameHub() {
     return () => {
       cancelled = true;
       connection.off(BOARD_STATE_EVENT);
+      connection.off(GAME_STATE_EVENT);
+      connection.off(DICE_ROLLED_EVENT);
       connection.stop();
       connectionRef.current = null;
     };
@@ -81,9 +106,70 @@ export function useGameHub() {
   const resetBoard = useCallback(() => {
     const connection = connectionRef.current;
     if (connection?.state === HubConnectionState.Connected) {
+      setLastRoll(null);
       connection.invoke('ResetBoard').catch(() => {});
     }
   }, []);
 
-  return { board, status, error, resetBoard };
+  const rollDice = useCallback(() => {
+    const connection = connectionRef.current;
+    if (connection?.state === HubConnectionState.Connected) {
+      connection.invoke('ClientRollDice').catch(() => {});
+    }
+  }, []);
+
+  const endTurn = useCallback(() => {
+    const connection = connectionRef.current;
+    if (connection?.state === HubConnectionState.Connected) {
+      connection.invoke('EndTurn').catch(() => {});
+    }
+  }, []);
+
+  // Rule-checked moves: the hub rejects illegal ones with a HubException whose
+  // message is safe to show. Returns true when the move was accepted.
+  const invokeMove = useCallback(async (method, ...args) => {
+    const connection = connectionRef.current;
+    if (connection?.state !== HubConnectionState.Connected) return false;
+    setActionError(null);
+    try {
+      await connection.invoke(method, ...args);
+      return true;
+    } catch (err) {
+      setActionError(err?.message?.replace(/^.*HubException: /, '') ?? 'Illegal move');
+      return false;
+    }
+  }, []);
+
+  const buildSettlement = useCallback((nodeId) => invokeMove('BuildSettlement', nodeId), [invokeMove]);
+  const buildRoad = useCallback((edgeId) => invokeMove('BuildRoad', edgeId), [invokeMove]);
+  const placeInitialSettlement = useCallback(
+    (nodeId) => invokeMove('PlaceInitialSettlement', nodeId),
+    [invokeMove],
+  );
+  const placeInitialRoad = useCallback((edgeId) => invokeMove('PlaceInitialRoad', edgeId), [invokeMove]);
+  const startGame = useCallback(
+    (playerCount) => {
+      setLastRoll(null);
+      return invokeMove('StartGame', playerCount);
+    },
+    [invokeMove],
+  );
+
+  return {
+    board,
+    game,
+    lastRoll,
+    status,
+    error,
+    actionError,
+    clearActionError: () => setActionError(null),
+    resetBoard,
+    rollDice,
+    endTurn,
+    buildSettlement,
+    buildRoad,
+    placeInitialSettlement,
+    placeInitialRoad,
+    startGame,
+  };
 }

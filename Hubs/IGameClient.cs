@@ -10,6 +10,10 @@ public interface IGameClient
 {
     Task BoardState(BoardStateDto board);
 
+    Task GameState(GameStateDto state);
+
+    Task DiceRolled(DiceRolledDto roll);
+
     Task PlayerJoined(string connectionId);
 
     Task PlayerLeft(string connectionId);
