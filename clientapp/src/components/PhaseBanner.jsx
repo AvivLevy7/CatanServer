@@ -34,12 +34,19 @@ export default function PhaseBanner({ game, currentPlayer, robberMover }) {
   } else if (game.phase === 'MovingRobber') {
     title = 'Robber! Move it';
     instruction = 'click a tile to move the robber and steal a card';
+  } else if (game.phase === 'PlacingFreeRoads') {
+    title = 'Road Building';
+    const n = game.freeRoadsRemaining ?? 0;
+    instruction = `place ${n} free road${n === 1 ? '' : 's'}`;
+  } else if (game.phase === 'GameOver') {
+    title = 'Game Over';
+    instruction = 'the game has ended';
   } else {
     title = 'Main Game';
     instruction = game.lastRoll ? 'build, trade, or end your turn' : 'roll the dice';
   }
 
-  const highlight = isSetup || isRobber;
+  const highlight = isSetup || isRobber || game.phase === 'PlacingFreeRoads';
 
   return (
     <section

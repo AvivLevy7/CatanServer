@@ -6,7 +6,9 @@ public enum GamePhase
     SetupRound2,
     MainGame,
     WaitingForDiscards,
-    MovingRobber
+    MovingRobber,
+    PlacingFreeRoads,
+    GameOver
 }
 
 /// <summary>What the current player must do next during setup.</summary>
@@ -38,6 +40,16 @@ public sealed class Game
     private readonly Dictionary<Guid, int> _pendingDiscards = [];
     private Guid? _robberMover;
 
+    // Development cards. TurnNumber increments every time the turn passes so cards
+    // bought this turn can be told apart from older ones.
+    private readonly DevelopmentDeck _deck;
+    private bool _developmentCardPlayedThisTurn;
+    // When the robber was triggered by a knight (not a 7) the turn continues afterwards.
+    private bool _robberFromKnight;
+
+    // Road Building: free roads still owed to the current player.
+    private int _freeRoadsRemaining;
+
     public Game(Guid id, BoardGraph board, IReadOnlyList<Player> players, Random? random = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(players.Count, 2);
@@ -46,11 +58,38 @@ public sealed class Game
         Board = board;
         _players = [.. players];
         _random = random ?? Random.Shared;
+        _deck = new DevelopmentDeck(_random);
     }
 
     public Guid Id { get; }
 
     public BoardGraph Board { get; }
+
+    /// <summary>Increments each time the turn passes. Starts at 1 in MainGame.</summary>
+    public int TurnNumber { get; private set; } = 1;
+
+    public int DevelopmentCardsRemaining => _deck.Remaining;
+
+    public bool DevelopmentCardPlayedThisTurn => _developmentCardPlayedThisTurn;
+
+    /// <summary>Victory points needed to win.</summary>
+    public const int WinningVictoryPoints = 10;
+
+    public Guid? WinnerId { get; private set; }
+
+    public int FreeRoadsRemaining => _freeRoadsRemaining;
+
+    public Guid? LargestArmyHolderId { get; private set; }
+
+    public Guid? LongestRoadHolderId { get; private set; }
+
+    /// <summary>Length of the record holder's road when they claimed it; the bar to beat.</summary>
+    public int LongestRoadLength { get; private set; }
+
+    /// <summary>Longest continuous road per player, recomputed after each change.</summary>
+    public IReadOnlyDictionary<Guid, int> RoadLengths => _roadLengths;
+
+    private readonly Dictionary<Guid, int> _roadLengths = [];
 
     public GamePhase Phase { get; private set; } = GamePhase.SetupRound1;
 
@@ -124,6 +163,7 @@ public sealed class Game
         node.Occupy(playerId, BuildingType.Settlement);
         player.AwardVictoryPoints(new Building(nodeId, playerId, BuildingType.Settlement).VictoryPoints);
         _pendingSetupSettlement = nodeId;
+        UpdateLongestRoad();
 
         if (Phase != GamePhase.SetupRound2)
         {
@@ -171,6 +211,7 @@ public sealed class Game
 
         edge.PlaceRoad(playerId);
         _pendingSetupSettlement = null;
+        UpdateLongestRoad();
         AdvanceSetupDraft();
     }
 
@@ -200,6 +241,179 @@ public sealed class Game
         player.Pay(BuildingCosts.Settlement);
         node.Occupy(playerId, BuildingType.Settlement);
         player.AwardVictoryPoints(new Building(nodeId, playerId, BuildingType.Settlement).VictoryPoints);
+        UpdateLongestRoad();
+    }
+
+    /// <summary>
+    /// Buys a development card for 1 Ore + 1 Wheat + 1 Sheep. The card cannot be played
+    /// until the player's next turn.
+    /// </summary>
+    public DevelopmentCard BuyDevelopmentCard(Guid playerId)
+    {
+        RequireMainGame();
+        RequireTurn(playerId);
+
+        if (_deck.Remaining == 0)
+        {
+            throw new GameRuleException("The development card deck is empty.");
+        }
+
+        var player = GetPlayer(playerId);
+        if (!player.CanAfford(BuildingCosts.DevelopmentCard))
+        {
+            throw new GameRuleException("A development card costs 1 Ore, 1 Wheat and 1 Sheep.");
+        }
+
+        player.Pay(BuildingCosts.DevelopmentCard);
+        _deck.TryDraw(out var type);
+
+        var card = new DevelopmentCard(Guid.NewGuid(), type, TurnNumber);
+        player.AddDevelopmentCard(card);
+
+        // Victory point cards score immediately (kept hidden client-side if desired).
+        if (type == DevelopmentCardType.VictoryPoint)
+        {
+            player.AwardVictoryPoints(1);
+        }
+
+        return card;
+    }
+
+    /// <summary>
+    /// Plays a Knight: marks it used, bumps the player's army, and hands control to the
+    /// robber flow. Only one development card may be played per turn, and never on the
+    /// turn it was bought.
+    /// </summary>
+    public void PlayKnightCard(Guid playerId, Guid cardId)
+    {
+        var (player, card) = BeginPlayingCard(playerId, cardId, DevelopmentCardType.Knight);
+
+        card.MarkPlayed();
+        player.RecordKnightPlayed();
+        _developmentCardPlayedThisTurn = true;
+        UpdateLargestArmy();
+
+        // A knight moves the robber without the discard step.
+        _robberMover = playerId;
+        _pendingDiscards.Clear();
+        Phase = GamePhase.MovingRobber;
+        _robberFromKnight = true;
+    }
+
+    /// <summary>Monopoly: every opponent hands over all of one resource.</summary>
+    public int PlayMonopoly(Guid playerId, Guid cardId, ResourceType resource)
+    {
+        var (player, card) = BeginPlayingCard(playerId, cardId, DevelopmentCardType.Monopoly);
+
+        card.MarkPlayed();
+        _developmentCardPlayedThisTurn = true;
+
+        var collected = 0;
+        foreach (var victim in _players.Where(p => p.Id != playerId))
+        {
+            var amount = victim.Resources[resource];
+            if (amount == 0)
+            {
+                continue;
+            }
+
+            victim.Pay(new Dictionary<ResourceType, int> { [resource] = amount });
+            collected += amount;
+        }
+
+        player.AddResources(resource, collected);
+        return collected;
+    }
+
+    /// <summary>Year of Plenty: take any two resources from the bank.</summary>
+    public void PlayYearOfPlenty(Guid playerId, Guid cardId, ResourceType first, ResourceType second)
+    {
+        var (player, card) = BeginPlayingCard(playerId, cardId, DevelopmentCardType.YearOfPlenty);
+
+        card.MarkPlayed();
+        _developmentCardPlayedThisTurn = true;
+
+        player.AddResources(first, 1);
+        player.AddResources(second, 1);
+    }
+
+    /// <summary>
+    /// Road Building: enter <see cref="GamePhase.PlacingFreeRoads"/> with two free roads
+    /// (fewer if the player's road supply is lower). Returns the number granted.
+    /// </summary>
+    public int PlayRoadBuilding(Guid playerId, Guid cardId)
+    {
+        var (_, card) = BeginPlayingCard(playerId, cardId, DevelopmentCardType.RoadBuilding);
+
+        var grant = Math.Min(2, RoadsRemaining(playerId));
+        if (grant == 0)
+        {
+            throw new GameRuleException("You have no roads left to place.");
+        }
+
+        card.MarkPlayed();
+        _developmentCardPlayedThisTurn = true;
+
+        _freeRoadsRemaining = grant;
+        Phase = GamePhase.PlacingFreeRoads;
+        return grant;
+    }
+
+    /// <summary>Places one of the free roads granted by Road Building.</summary>
+    public void PlaceFreeRoad(Guid playerId, EdgeId edgeId)
+    {
+        if (Phase != GamePhase.PlacingFreeRoads)
+        {
+            throw new GameRuleException("You have no free roads to place.");
+        }
+
+        RequireTurn(playerId);
+
+        var edge = RequireBuildableRoadEdge(playerId, edgeId);
+        edge.PlaceRoad(playerId);
+        UpdateLongestRoad();
+
+        if (--_freeRoadsRemaining == 0 || RoadsRemaining(playerId) == 0)
+        {
+            _freeRoadsRemaining = 0;
+            Phase = GamePhase.MainGame;
+        }
+    }
+
+    private (Player Player, DevelopmentCard Card) BeginPlayingCard(Guid playerId, Guid cardId, DevelopmentCardType expected)
+    {
+        RequireMainGame();
+        RequireTurn(playerId);
+
+        var player = GetPlayer(playerId);
+        var card = player.FindDevelopmentCard(cardId)
+            ?? throw new GameRuleException("You do not hold that card.");
+
+        if (card.Type != expected)
+        {
+            throw new GameRuleException($"That card is not a {expected}.");
+        }
+
+        RequireCardPlayable(card);
+        return (player, card);
+    }
+
+    private void RequireCardPlayable(DevelopmentCard card)
+    {
+        if (card.IsPlayed)
+        {
+            throw new GameRuleException("That card has already been played.");
+        }
+
+        if (card.BoughtOnTurn >= TurnNumber)
+        {
+            throw new GameRuleException("You cannot play a development card on the turn you bought it.");
+        }
+
+        if (_developmentCardPlayedThisTurn)
+        {
+            throw new GameRuleException("You may only play one development card per turn.");
+        }
     }
 
     /// <summary>
@@ -275,6 +489,22 @@ public sealed class Game
         RequireTurn(playerId);
         RequireRoadSupply(playerId);
 
+        var edge = RequireBuildableRoadEdge(playerId, edgeId);
+
+        var player = GetPlayer(playerId);
+        if (!player.CanAfford(BuildingCosts.Road))
+        {
+            throw new GameRuleException("A road costs 1 Wood and 1 Brick.");
+        }
+
+        player.Pay(BuildingCosts.Road);
+        edge.PlaceRoad(playerId);
+        UpdateLongestRoad();
+    }
+
+    /// <summary>Validates an edge for a new road: on the board, empty, and connected to the player's network.</summary>
+    private Edge RequireBuildableRoadEdge(Guid playerId, EdgeId edgeId)
+    {
         if (!Board.TryGetEdge(edgeId, out var edge))
         {
             throw new GameRuleException("That path is not on the board.");
@@ -290,14 +520,7 @@ public sealed class Game
             throw new GameRuleException("A road must connect to one of your roads or settlements.");
         }
 
-        var player = GetPlayer(playerId);
-        if (!player.CanAfford(BuildingCosts.Road))
-        {
-            throw new GameRuleException("A road costs 1 Wood and 1 Brick.");
-        }
-
-        player.Pay(BuildingCosts.Road);
-        edge.PlaceRoad(playerId);
+        return edge;
     }
 
     /// <summary>
@@ -479,7 +702,15 @@ public sealed class Game
 
         _robberMover = null;
         Phase = GamePhase.MainGame;
-        AdvanceTurn();
+
+        if (_robberFromKnight)
+        {
+            _robberFromKnight = false;
+        }
+        else
+        {
+            AdvanceTurn();
+        }
 
         return stolen;
     }
@@ -536,8 +767,12 @@ public sealed class Game
         return CurrentPlayer;
     }
 
-    private void AdvanceTurn() =>
+    private void AdvanceTurn()
+    {
         _currentTurnIndex = (_currentTurnIndex + 1) % _players.Count;
+        TurnNumber++;
+        _developmentCardPlayedThisTurn = false;
+    }
 
     /// <summary>
     /// Snake draft: round 1 runs forward and stays on the last player for round 2,
@@ -584,9 +819,175 @@ public sealed class Game
             {
                 GamePhase.WaitingForDiscards => "Waiting for players to discard.",
                 GamePhase.MovingRobber => "The robber must be moved first.",
+                GamePhase.PlacingFreeRoads => "Place your free roads first.",
+                GamePhase.GameOver => "The game is over.",
                 _ => "Finish the setup phase first."
             });
         }
+    }
+
+    /// <summary>
+    /// Largest Army: first to 3 knights claims it; it transfers only to a player who
+    /// strictly exceeds the current holder's count.
+    /// </summary>
+    private void UpdateLargestArmy()
+    {
+        var holder = LargestArmyHolderId is { } id ? GetPlayer(id) : null;
+        var bar = holder?.KnightsPlayed ?? Achievements.LargestArmyMinimum - 1;
+
+        var challenger = _players
+            .Where(p => p.Id != holder?.Id && p.KnightsPlayed > bar)
+            .OrderByDescending(p => p.KnightsPlayed)
+            .FirstOrDefault();
+
+        if (challenger is null)
+        {
+            return;
+        }
+
+        holder?.RevokeVictoryPoints(Achievements.BonusVictoryPoints);
+        challenger.AwardVictoryPoints(Achievements.BonusVictoryPoints);
+        LargestArmyHolderId = challenger.Id;
+    }
+
+    /// <summary>
+    /// Longest Road: recomputes every player's longest continuous road, then applies the
+    /// claim/transfer rules. The holder keeps the title at their current length even if
+    /// it shrinks, unless someone strictly exceeds it or they drop below the minimum.
+    /// </summary>
+    private void UpdateLongestRoad()
+    {
+        foreach (var player in _players)
+        {
+            _roadLengths[player.Id] = LongestRoadFor(player.Id);
+        }
+
+        var holder = LongestRoadHolderId is { } id ? GetPlayer(id) : null;
+
+        if (holder is not null)
+        {
+            var holderLength = _roadLengths[holder.Id];
+
+            if (holderLength < Achievements.LongestRoadMinimum)
+            {
+                // Road was cut below 5: title is lost. It passes to the sole longest
+                // qualifying player, or to nobody on a tie.
+                holder.RevokeVictoryPoints(Achievements.BonusVictoryPoints);
+                LongestRoadHolderId = null;
+                LongestRoadLength = 0;
+                holder = null;
+            }
+            else
+            {
+                LongestRoadLength = holderLength;
+            }
+        }
+
+        var bar = holder is null ? Achievements.LongestRoadMinimum - 1 : LongestRoadLength;
+
+        var contenders = _players
+            .Where(p => p.Id != holder?.Id && _roadLengths[p.Id] > bar)
+            .OrderByDescending(p => _roadLengths[p.Id])
+            .ToList();
+
+        if (contenders.Count == 0)
+        {
+            return;
+        }
+
+        // With no holder, a tie at the top means nobody claims it.
+        if (holder is null && contenders.Count > 1
+            && _roadLengths[contenders[0].Id] == _roadLengths[contenders[1].Id])
+        {
+            return;
+        }
+
+        var challenger = contenders[0];
+        holder?.RevokeVictoryPoints(Achievements.BonusVictoryPoints);
+        challenger.AwardVictoryPoints(Achievements.BonusVictoryPoints);
+        LongestRoadHolderId = challenger.Id;
+        LongestRoadLength = _roadLengths[challenger.Id];
+    }
+
+    /// <summary>
+    /// Longest continuous trail of <paramref name="playerId"/>'s roads. Each edge may be
+    /// used once; the trail cannot pass through an intersection holding an opponent's building.
+    /// </summary>
+    public int LongestRoadFor(Guid playerId)
+    {
+        var ownEdges = Board.Edges.Where(e => e.OwnerId == playerId).ToList();
+        if (ownEdges.Count == 0)
+        {
+            return 0;
+        }
+
+        var best = 0;
+        var visited = new HashSet<EdgeId>();
+
+        // Start from every edge in both directions; this handles cycles and branches.
+        foreach (var start in ownEdges)
+        {
+            visited.Add(start.Id);
+            best = Math.Max(best, 1 + Extend(start.Second, start.First));
+            best = Math.Max(best, 1 + Extend(start.First, start.Second));
+            visited.Remove(start.Id);
+        }
+
+        return best;
+
+        int Extend(NodeId cameFrom, NodeId at)
+        {
+            var node = Board.GetNode(at);
+
+            // An opponent's building blocks the road at this intersection.
+            if (node.IsOccupied && node.OwnerId != playerId)
+            {
+                return 0;
+            }
+
+            var longest = 0;
+            foreach (var edgeId in node.Edges)
+            {
+                if (visited.Contains(edgeId))
+                {
+                    continue;
+                }
+
+                var edge = Board.GetEdge(edgeId);
+                if (edge.OwnerId != playerId)
+                {
+                    continue;
+                }
+
+                visited.Add(edgeId);
+                longest = Math.Max(longest, 1 + Extend(at, edge.Other(at)));
+                visited.Remove(edgeId);
+            }
+
+            return longest;
+        }
+    }
+
+    /// <summary>
+    /// Ends the game if any player has reached the victory threshold. Call after any
+    /// action that can award points. Returns the winner, if any.
+    /// </summary>
+    public Player? CheckForWinner()
+    {
+        if (WinnerId is not null)
+        {
+            return GetPlayer(WinnerId.Value);
+        }
+
+        var winner = _players.FirstOrDefault(p => p.VictoryPoints >= WinningVictoryPoints);
+        if (winner is null)
+        {
+            return null;
+        }
+
+        WinnerId = winner.Id;
+        Phase = GamePhase.GameOver;
+        return winner;
     }
 
     private void RequireRoadSupply(Guid playerId)

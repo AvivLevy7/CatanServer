@@ -17,6 +17,8 @@ public sealed class Player
     private readonly Dictionary<ResourceType, int> _resources =
         Enum.GetValues<ResourceType>().ToDictionary(type => type, _ => 0);
 
+    private readonly List<DevelopmentCard> _developmentCards = [];
+
     public Player(Guid id, string name, PlayerColor color)
     {
         Id = id;
@@ -35,6 +37,18 @@ public sealed class Player
     public IReadOnlyDictionary<ResourceType, int> Resources => _resources;
 
     public int TotalResourceCount => _resources.Values.Sum();
+
+    public IReadOnlyList<DevelopmentCard> DevelopmentCards => _developmentCards;
+
+    /// <summary>Knights played so far; drives Largest Army.</summary>
+    public int KnightsPlayed { get; private set; }
+
+    internal void AddDevelopmentCard(DevelopmentCard card) => _developmentCards.Add(card);
+
+    internal DevelopmentCard? FindDevelopmentCard(Guid cardId) =>
+        _developmentCards.FirstOrDefault(card => card.Id == cardId);
+
+    internal void RecordKnightPlayed() => KnightsPlayed++;
 
     internal void AddResources(ResourceType type, int amount)
     {
@@ -74,5 +88,11 @@ public sealed class Player
     {
         ArgumentOutOfRangeException.ThrowIfNegative(points);
         VictoryPoints += points;
+    }
+
+    internal void RevokeVictoryPoints(int points)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(points);
+        VictoryPoints = Math.Max(0, VictoryPoints - points);
     }
 }

@@ -41,6 +41,18 @@ public interface IGameStateService
     /// <summary>Opponents the current robber-mover could steal from if the robber landed on <paramref name="hexId"/>.</summary>
     IReadOnlyList<Guid> GetStealCandidates(string hexId);
 
+    /// <summary>Current player buys a development card (1 Ore, 1 Wheat, 1 Sheep).</summary>
+    GameStateDto BuyDevelopmentCard();
+
+    /// <summary>Current player plays a Knight, entering the robber-moving phase.</summary>
+    GameStateDto PlayKnightCard(Guid cardId);
+
+    GameStateDto PlayMonopoly(Guid cardId, string resource);
+
+    GameStateDto PlayYearOfPlenty(Guid cardId, string first, string second);
+
+    GameStateDto PlayRoadBuilding(Guid cardId);
+
     /// <summary>Setup phase: free settlement for the current player.</summary>
     GameStateDto PlaceInitialSettlement(string nodeId);
 
@@ -158,6 +170,7 @@ public sealed class GameStateService : IGameStateService
                 ?? throw new GameRuleException("That intersection is not on the board.");
 
             _game.BuildSettlement(_game.CurrentTurnPlayerId, node.Id);
+            _game.CheckForWinner();
             return ProjectGame(_game);
         }
     }
@@ -169,7 +182,16 @@ public sealed class GameStateService : IGameStateService
             var edge = _game.Board.FindEdge(edgeId)
                 ?? throw new GameRuleException("That path is not on the board.");
 
-            _game.BuildRoad(_game.CurrentTurnPlayerId, edge.Id);
+            if (_game.Phase == GamePhase.PlacingFreeRoads)
+            {
+                _game.PlaceFreeRoad(_game.CurrentTurnPlayerId, edge.Id);
+            }
+            else
+            {
+                _game.BuildRoad(_game.CurrentTurnPlayerId, edge.Id);
+            }
+
+            _game.CheckForWinner();
             return ProjectGame(_game);
         }
     }
@@ -182,6 +204,7 @@ public sealed class GameStateService : IGameStateService
                 ?? throw new GameRuleException("That intersection is not on the board.");
 
             _game.BuildCity(_game.CurrentTurnPlayerId, node.Id);
+            _game.CheckForWinner();
             return ProjectGame(_game);
         }
     }
@@ -244,6 +267,56 @@ public sealed class GameStateService : IGameStateService
         }
     }
 
+    public GameStateDto BuyDevelopmentCard()
+    {
+        lock (_gate)
+        {
+            _game.BuyDevelopmentCard(_game.CurrentTurnPlayerId);
+            _game.CheckForWinner();
+            return ProjectGame(_game);
+        }
+    }
+
+    public GameStateDto PlayKnightCard(Guid cardId)
+    {
+        lock (_gate)
+        {
+            _game.PlayKnightCard(_game.CurrentTurnPlayerId, cardId);
+            _game.CheckForWinner();
+            return ProjectGame(_game);
+        }
+    }
+
+    public GameStateDto PlayMonopoly(Guid cardId, string resource)
+    {
+        var parsed = ParseResource(resource);
+        lock (_gate)
+        {
+            _game.PlayMonopoly(_game.CurrentTurnPlayerId, cardId, parsed);
+            return ProjectGame(_game);
+        }
+    }
+
+    public GameStateDto PlayYearOfPlenty(Guid cardId, string first, string second)
+    {
+        var a = ParseResource(first);
+        var b = ParseResource(second);
+        lock (_gate)
+        {
+            _game.PlayYearOfPlenty(_game.CurrentTurnPlayerId, cardId, a, b);
+            return ProjectGame(_game);
+        }
+    }
+
+    public GameStateDto PlayRoadBuilding(Guid cardId)
+    {
+        lock (_gate)
+        {
+            _game.PlayRoadBuilding(_game.CurrentTurnPlayerId, cardId);
+            return ProjectGame(_game);
+        }
+    }
+
     private static AxialCoordinate ParseHexId(string hexId)
     {
         var parts = hexId.Split(',');
@@ -303,7 +376,19 @@ public sealed class GameStateService : IGameStateService
                 player.Resources.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
                 game.RoadsRemaining(player.Id),
                 game.SettlementsRemaining(player.Id),
-                game.CitiesRemaining(player.Id)))
+                game.CitiesRemaining(player.Id),
+                player.DevelopmentCards
+                    .Select(card => new DevelopmentCardDto(
+                        card.Id,
+                        card.Type.ToString(),
+                        card.IsPlayed,
+                        CanPlayNow: player.Id == game.CurrentTurnPlayerId
+                                    && game.Phase == GamePhase.MainGame
+                                    && !game.DevelopmentCardPlayedThisTurn
+                                    && card.CanPlayOnTurn(game.TurnNumber)))
+                    .ToList(),
+                player.KnightsPlayed,
+                game.RoadLengths.GetValueOrDefault(player.Id)))
             .ToList();
 
         var buildings = game.Buildings
@@ -327,7 +412,14 @@ public sealed class GameStateService : IGameStateService
             game.PendingSetupSettlement?.ToString(),
             $"{game.RobberHex.Coordinate.Q},{game.RobberHex.Coordinate.R}",
             game.RobberMover,
-            game.PendingDiscards.ToDictionary(pair => pair.Key, pair => pair.Value));
+            game.PendingDiscards.ToDictionary(pair => pair.Key, pair => pair.Value),
+            game.DevelopmentCardsRemaining,
+            game.TurnNumber,
+            game.FreeRoadsRemaining,
+            game.WinnerId,
+            game.LargestArmyHolderId,
+            game.LongestRoadHolderId,
+            game.LongestRoadLength);
     }
 
     private static DiceRolledDto ProjectRoll(RollOutcome outcome) =>

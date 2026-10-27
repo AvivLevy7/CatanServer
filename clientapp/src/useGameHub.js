@@ -11,6 +11,7 @@ const BOARD_STATE_EVENT = 'BoardState';
 const GAME_STATE_EVENT = 'GameState';
 const DICE_ROLLED_EVENT = 'DiceRolled';
 const ROBBER_MOVED_EVENT = 'RobberMoved';
+const GAME_OVER_EVENT = 'GameOver';
 
 /**
  * Owns the SignalR connection and exposes the server-authoritative board and game state.
@@ -21,6 +22,7 @@ export function useGameHub() {
   const [game, setGame] = useState(null);
   const [lastRoll, setLastRoll] = useState(null);
   const [lastRobbery, setLastRobbery] = useState(null);
+  const [winner, setWinner] = useState(null);
   const [status, setStatus] = useState('connecting');
   const [error, setError] = useState(null);
   const [actionError, setActionError] = useState(null);
@@ -60,6 +62,12 @@ export function useGameHub() {
     connection.on(ROBBER_MOVED_EVENT, (robbery) => {
       if (!cancelled) {
         setLastRobbery(robbery);
+      }
+    });
+
+    connection.on(GAME_OVER_EVENT, (winningPlayer) => {
+      if (!cancelled) {
+        setWinner(winningPlayer);
       }
     });
 
@@ -107,6 +115,7 @@ export function useGameHub() {
       connection.off(GAME_STATE_EVENT);
       connection.off(DICE_ROLLED_EVENT);
       connection.off(ROBBER_MOVED_EVENT);
+      connection.off(GAME_OVER_EVENT);
       connection.stop();
       connectionRef.current = null;
     };
@@ -164,6 +173,20 @@ export function useGameHub() {
     (hexId, targetPlayerId) => invokeMove('MoveRobber', hexId, targetPlayerId ?? null),
     [invokeMove],
   );
+  const buyDevelopmentCard = useCallback(() => invokeMove('BuyDevelopmentCard'), [invokeMove]);
+  const playKnightCard = useCallback((cardId) => invokeMove('PlayKnightCard', cardId), [invokeMove]);
+  const playMonopoly = useCallback(
+    (cardId, resource) => invokeMove('PlayMonopoly', cardId, resource),
+    [invokeMove],
+  );
+  const playYearOfPlenty = useCallback(
+    (cardId, res1, res2) => invokeMove('PlayYearOfPlenty', cardId, res1, res2),
+    [invokeMove],
+  );
+  const playRoadBuilding = useCallback(
+    (cardId) => invokeMove('PlayRoadBuilding', cardId),
+    [invokeMove],
+  );
   // Read-only query; returns [] on failure so the caller can fall back gracefully.
   const getStealCandidates = useCallback(async (hexId) => {
     const connection = connectionRef.current;
@@ -182,6 +205,7 @@ export function useGameHub() {
   const startGame = useCallback(
     (playerCount) => {
       setLastRoll(null);
+      setWinner(null);
       return invokeMove('StartGame', playerCount);
     },
     [invokeMove],
@@ -205,6 +229,12 @@ export function useGameHub() {
     discardCards,
     moveRobber,
     getStealCandidates,
+    buyDevelopmentCard,
+    playKnightCard,
+    playMonopoly,
+    playYearOfPlenty,
+    playRoadBuilding,
+    winner,
     lastRobbery,
     placeInitialSettlement,
     placeInitialRoad,

@@ -1,5 +1,7 @@
 namespace CatanServer.Contracts;
 
+public sealed record DevelopmentCardDto(Guid Id, string Type, bool IsPlayed, bool CanPlayNow);
+
 public sealed record PlayerDto(
     Guid Id,
     string Name,
@@ -8,7 +10,10 @@ public sealed record PlayerDto(
     IReadOnlyDictionary<string, int> Resources,
     int RoadsRemaining,
     int SettlementsRemaining,
-    int CitiesRemaining);
+    int CitiesRemaining,
+    IReadOnlyList<DevelopmentCardDto> DevelopmentCards,
+    int KnightsPlayed,
+    int LongestRoadLength);
 
 public sealed record BuildingDto(string NodeId, Guid OwnerId, string Type);
 
@@ -30,7 +35,14 @@ public sealed record GameStateDto(
     string? PendingSetupSettlementNodeId,
     string RobberHexId,
     Guid? RobberMoverId,
-    IReadOnlyDictionary<Guid, int> PendingDiscards);
+    IReadOnlyDictionary<Guid, int> PendingDiscards,
+    int DevelopmentCardsRemaining,
+    int TurnNumber,
+    int FreeRoadsRemaining,
+    Guid? WinnerId,
+    Guid? LargestArmyHolderId,
+    Guid? LongestRoadHolderId,
+    int LongestRoadLength);
 
 /// <summary>Broadcast when the robber steals so clients can show who lost what.</summary>
 public sealed record RobberMovedDto(Guid MovedBy, string HexId, Guid? VictimId, string? StolenResource);

@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import Board from './components/Board';
 import DicePanel from './components/DicePanel';
+import DevCardPanel from './components/DevCardPanel';
+import { MonopolyModal, YearOfPlentyModal } from './components/DevCardModals';
 import DiscardModal from './components/DiscardModal';
+import GameOverOverlay from './components/GameOverOverlay';
 import PhaseBanner from './components/PhaseBanner';
 import PlayerPanel from './components/PlayerPanel';
 import StealPicker from './components/StealPicker';
@@ -66,6 +69,12 @@ export default function App() {
     discardCards,
     moveRobber,
     getStealCandidates,
+    buyDevelopmentCard,
+    playKnightCard,
+    playMonopoly,
+    playYearOfPlenty,
+    playRoadBuilding,
+    winner,
     placeInitialSettlement,
     placeInitialRoad,
     startGame,
@@ -74,6 +83,8 @@ export default function App() {
   const [playerCount, setPlayerCount] = useState(4);
   // Robber destination awaiting a steal-target choice.
   const [pendingRobber, setPendingRobber] = useState(null);
+  // Action card awaiting its choice modal: { type, cardId }.
+  const [pendingCard, setPendingCard] = useState(null);
 
   // Hold the loading screen until the first BoardState arrives from the hub.
   if (!board) {
@@ -108,7 +119,10 @@ export default function App() {
   const isSetup = phase === 'SetupRound1' || phase === 'SetupRound2';
   const isDiscarding = phase === 'WaitingForDiscards';
   const isMovingRobber = phase === 'MovingRobber';
+  const isPlacingFreeRoads = phase === 'PlacingFreeRoads';
+  const isGameOver = phase === 'GameOver';
   const isMainGame = phase === 'MainGame';
+  const winningPlayer = winner ?? players.find((p) => p.id === game?.winnerId) ?? null;
 
   // Hot-seat: walk owing players one at a time, in seat order.
   const pendingDiscards = game?.pendingDiscards ?? {};
@@ -133,8 +147,25 @@ export default function App() {
     if (edge.ownerId != null) return;
     if (isSetup) {
       placeInitialRoad(edge.id);
-    } else if (isMainGame) {
+    } else if (isMainGame || isPlacingFreeRoads) {
       buildRoad(edge.id);
+    }
+  };
+
+  const handlePlayCard = (card) => {
+    switch (card.type) {
+      case 'Knight':
+        playKnightCard(card.id);
+        break;
+      case 'RoadBuilding':
+        playRoadBuilding(card.id);
+        break;
+      case 'Monopoly':
+      case 'YearOfPlenty':
+        setPendingCard({ type: card.type, cardId: card.id });
+        break;
+      default:
+        break;
     }
   };
 
@@ -166,6 +197,7 @@ export default function App() {
     startGame(playerCount);
     setSelected(null);
     setPendingRobber(null);
+    setPendingCard(null);
   };
 
   return (
@@ -265,8 +297,22 @@ export default function App() {
               disabled={!isLive}
             />
           )}
+          {isMainGame && (
+            <DevCardPanel
+              player={currentPlayer}
+              deckRemaining={game?.developmentCardsRemaining}
+              onBuy={buyDevelopmentCard}
+              onPlay={handlePlayCard}
+              disabled={!isLive}
+            />
+          )}
           {game ? (
-            <PlayerPanel players={players} currentTurnPlayerId={currentTurnPlayerId} />
+            <PlayerPanel
+              players={players}
+              currentTurnPlayerId={currentTurnPlayerId}
+              largestArmyHolderId={game?.largestArmyHolderId}
+              longestRoadHolderId={game?.longestRoadHolderId}
+            />
           ) : (
             <p className="text-center text-sm text-sky-300">Waiting for game state...</p>
           )}
@@ -287,6 +333,39 @@ export default function App() {
           candidates={players.filter((p) => pendingRobber.candidateIds.includes(p.id))}
           onPick={handleStealPick}
           onCancel={() => setPendingRobber(null)}
+          disabled={!isLive}
+        />
+      )}
+
+      {pendingCard?.type === 'Monopoly' && (
+        <MonopolyModal
+          disabled={!isLive}
+          onCancel={() => setPendingCard(null)}
+          onConfirm={async (resource) => {
+            const { cardId } = pendingCard;
+            setPendingCard(null);
+            await playMonopoly(cardId, resource);
+          }}
+        />
+      )}
+
+      {pendingCard?.type === 'YearOfPlenty' && (
+        <YearOfPlentyModal
+          disabled={!isLive}
+          onCancel={() => setPendingCard(null)}
+          onConfirm={async (a, b) => {
+            const { cardId } = pendingCard;
+            setPendingCard(null);
+            await playYearOfPlenty(cardId, a, b);
+          }}
+        />
+      )}
+
+      {isGameOver && (
+        <GameOverOverlay
+          winner={winningPlayer}
+          players={players}
+          onNewGame={handleNewGame}
           disabled={!isLive}
         />
       )}

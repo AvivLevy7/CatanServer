@@ -16,6 +16,8 @@ public interface IGameClient
 
     Task RobberMoved(RobberMovedDto robber);
 
+    Task GameOver(PlayerDto winner);
+
     Task PlayerJoined(string connectionId);
 
     Task PlayerLeft(string connectionId);

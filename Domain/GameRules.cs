@@ -14,6 +14,14 @@ public static class PieceLimits
     public const int Cities = 4;
 }
 
+/// <summary>Bonus achievements worth 2 VP each.</summary>
+public static class Achievements
+{
+    public const int BonusVictoryPoints = 2;
+    public const int LargestArmyMinimum = 3;
+    public const int LongestRoadMinimum = 5;
+}
+
 /// <summary>Exchange rates with the bank.</summary>
 public static class TradeRates
 {
@@ -42,5 +50,12 @@ public static class BuildingCosts
     {
         [ResourceType.Grain] = 2,
         [ResourceType.Ore] = 3
+    };
+
+    public static readonly IReadOnlyDictionary<ResourceType, int> DevelopmentCard = new Dictionary<ResourceType, int>
+    {
+        [ResourceType.Ore] = 1,
+        [ResourceType.Grain] = 1,
+        [ResourceType.Wool] = 1
     };
 }

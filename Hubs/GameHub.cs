@@ -133,6 +133,21 @@ public sealed class GameHub : Hub<IGameClient>
     public Task DiscardCards(Guid playerId, Dictionary<string, int> resourcesToDrop) =>
         ApplyMove("DiscardCards", playerId.ToString(), () => _gameState.DiscardCards(playerId, resourcesToDrop));
 
+    public Task BuyDevelopmentCard() =>
+        ApplyMove("BuyDevelopmentCard", "deck", _gameState.BuyDevelopmentCard);
+
+    public Task PlayKnightCard(Guid cardId) =>
+        ApplyMove("PlayKnightCard", cardId.ToString(), () => _gameState.PlayKnightCard(cardId));
+
+    public Task PlayMonopoly(Guid cardId, string resource) =>
+        ApplyMove("PlayMonopoly", resource, () => _gameState.PlayMonopoly(cardId, resource));
+
+    public Task PlayYearOfPlenty(Guid cardId, string res1, string res2) =>
+        ApplyMove("PlayYearOfPlenty", $"{res1}+{res2}", () => _gameState.PlayYearOfPlenty(cardId, res1, res2));
+
+    public Task PlayRoadBuilding(Guid cardId) =>
+        ApplyMove("PlayRoadBuilding", cardId.ToString(), () => _gameState.PlayRoadBuilding(cardId));
+
     /// <summary>Returns which opponents could be robbed if the robber moved to <paramref name="hexId"/>.</summary>
     public IReadOnlyList<Guid> GetStealCandidates(string hexId)
     {
@@ -197,5 +212,12 @@ public sealed class GameHub : Hub<IGameClient>
 
         _logger.LogInformation("{Move} at {Target} by {ConnectionId}", move, target, Context.ConnectionId);
         await Clients.All.GameState(state);
+
+        if (state.Phase == nameof(GamePhase.GameOver) && state.WinnerId is { } winnerId)
+        {
+            var winner = state.Players.First(p => p.Id == winnerId);
+            _logger.LogInformation("Game {GameId} won by {Winner}", state.GameId, winner.Name);
+            await Clients.All.GameOver(winner);
+        }
     }
 }
