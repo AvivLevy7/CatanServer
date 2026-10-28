@@ -35,7 +35,7 @@ function PlayerChip({ player, isCurrentTurn, isMe, hasLargestArmy, hasLongestRoa
   return (
     <li
       aria-current={isCurrentTurn ? 'true' : undefined}
-      className={`panel-glass relative flex min-w-0 flex-1 items-center gap-2 overflow-hidden px-2 py-1 transition-all ${
+      className={`panel-glass relative flex min-w-0 flex-1 items-center gap-2 overflow-hidden px-2 py-1 transition-all max-md:gap-1 max-md:px-1 max-md:py-0.5 ${
         isCurrentTurn ? `ring-2 ${s.ring} shadow-[0_0_24px_rgba(245,190,90,0.25)]` : 'opacity-85 hover:opacity-100'
       }`}
     >
@@ -44,7 +44,7 @@ function PlayerChip({ player, isCurrentTurn, isMe, hasLargestArmy, hasLongestRoa
 
       <div className="flex min-w-0 items-center gap-1.5 pl-1">
         <span className={`inline-block size-2.5 rounded-full ring-1 ring-black/40 ${s.dot}`} />
-        <span className="truncate font-display text-xs font-bold tracking-wide text-parchment-50">{player.name}</span>
+        <span className="truncate font-display text-xs font-bold tracking-wide text-parchment-50 max-md:text-[10px]">{player.name}</span>
         {isMe && <span className="font-display text-[8px] uppercase tracking-widest text-amber-300/80">you</span>}
         {isCurrentTurn && (
           <span className="rounded-sm bg-gradient-to-b from-amber-200 to-amber-500 px-1 py-px font-display text-[8px] font-black uppercase tracking-widest text-ink-900 shadow">
@@ -53,24 +53,26 @@ function PlayerChip({ player, isCurrentTurn, isMe, hasLargestArmy, hasLongestRoa
         )}
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2 max-md:gap-1">
         <Shield value={player.victoryPoints} label="VP" title="Victory points" tone="gold" lit={isCurrentTurn} />
-        <Shield
-          value={player.knightsPlayed ?? 0}
-          label="Knights"
-          title={hasLargestArmy ? 'Largest Army (+2 VP)' : 'Knights played'}
-          tone={hasLargestArmy ? 'crimson' : 'slate'}
-          lit={hasLargestArmy}
-        />
-        <Shield
-          value={player.longestRoadLength ?? 0}
-          label="Road"
-          title={hasLongestRoad ? 'Longest Road (+2 VP)' : 'Longest road length'}
-          tone={hasLongestRoad ? 'emerald' : 'slate'}
-          lit={hasLongestRoad}
-        />
+        <div className="flex items-center gap-2 max-md:hidden">
+          <Shield
+            value={player.knightsPlayed ?? 0}
+            label="Knights"
+            title={hasLargestArmy ? 'Largest Army (+2 VP)' : 'Knights played'}
+            tone={hasLargestArmy ? 'crimson' : 'slate'}
+            lit={hasLargestArmy}
+          />
+          <Shield
+            value={player.longestRoadLength ?? 0}
+            label="Road"
+            title={hasLongestRoad ? 'Longest Road (+2 VP)' : 'Longest road length'}
+            tone={hasLongestRoad ? 'emerald' : 'slate'}
+            lit={hasLongestRoad}
+          />
+        </div>
 
-        <div className="ml-auto flex items-center gap-1 text-[10px]">
+        <div className="ml-auto flex items-center gap-1 text-[10px] max-md:hidden">
           {isMe ? (
             <ul className="flex gap-0.5" aria-label="Your resources">
               {RESOURCES.map(({ key, label }) => {

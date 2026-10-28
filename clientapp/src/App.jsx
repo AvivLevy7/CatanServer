@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Board from './components/Board';
+import ZoomableBoard from './components/ZoomableBoard';
+import RotateDeviceOverlay from './components/RotateDeviceOverlay';
 import DicePanel from './components/DicePanel';
 import CardHand from './components/CardHand';
 import SideDrawer from './components/SideDrawer';
@@ -343,9 +345,10 @@ export default function App() {
 
   return (
     <main className="bg-tavern flex h-screen w-screen max-h-screen max-w-screen flex-col overflow-hidden text-parchment-100">
+      <RotateDeviceOverlay />
       {/* ---- Top: title strip + player status bar (flex-none) ---- */}
-      <header className="flex flex-none flex-col gap-0.5 px-2 pr-14 pt-0.5">
-        <div className="flex items-center justify-between gap-3">
+      <header className="flex flex-none flex-col gap-0.5 px-2 pr-14 pt-0.5 max-md:gap-0 max-md:px-1 max-md:pr-12">
+        <div className="flex items-center justify-between gap-3 max-md:hidden">
           <h1 className="font-display text-sm font-black tracking-[0.3em] text-transparent bg-gradient-to-b from-amber-100 via-amber-300 to-amber-600 bg-clip-text drop-shadow-[0_2px_12px_rgba(245,190,90,0.35)]">
             CATAN
           </h1>
@@ -412,28 +415,30 @@ export default function App() {
       </header>
 
       {/* ---- Middle: board (flex-1 min-h-0) with phase/dice rail alongside ---- */}
-      <div className="flex min-h-0 w-full flex-1 gap-1 px-1 pr-14 pt-0.5">
+      <div className="flex min-h-0 w-full flex-1 gap-1 px-1 pr-14 pt-0.5 max-md:px-0.5 max-md:pr-12 max-md:pt-0">
         <section
           aria-label="Board"
-          className="flex min-h-0 min-w-0 w-full flex-1 items-center justify-center overflow-hidden rounded-2xl border border-amber-800/40 bg-gradient-to-b from-sky-950/70 to-ink-900/70 p-1 shadow-2xl shadow-black/60 backdrop-blur-sm"
+          className="flex min-h-0 min-w-0 w-full flex-1 touch-none items-center justify-center overflow-hidden rounded-2xl border border-amber-800/40 bg-gradient-to-b from-sky-950/70 to-ink-900/70 p-1 shadow-2xl shadow-black/60 backdrop-blur-sm max-md:rounded-lg max-md:p-0"
         >
-          <Board
-            tiles={tiles}
-            nodes={liveBoard.nodes ?? []}
-            edges={liveBoard.edges ?? []}
-            playerColors={playerColors}
-            selectedId={selected?.id}
-            onTileSelect={handleTileSelect}
-            onNodeClick={handleNodeClick}
-            onEdgeClick={handleEdgeClick}
-            highlightNodeId={isSetup && isMyTurn ? game?.pendingSetupSettlementNodeId ?? null : null}
-            upgradablePlayerId={isMainGame && isMyTurn ? myPlayerId : null}
-            robberMode={iMoveRobber}
-            interactive={!isRolling && (iMoveRobber || (canAct && (isSetup || isPlacingFreeRoads || canBuild)))}
-          />
+          <ZoomableBoard>
+            <Board
+              tiles={tiles}
+              nodes={liveBoard.nodes ?? []}
+              edges={liveBoard.edges ?? []}
+              playerColors={playerColors}
+              selectedId={selected?.id}
+              onTileSelect={handleTileSelect}
+              onNodeClick={handleNodeClick}
+              onEdgeClick={handleEdgeClick}
+              highlightNodeId={isSetup && isMyTurn ? game?.pendingSetupSettlementNodeId ?? null : null}
+              upgradablePlayerId={isMainGame && isMyTurn ? myPlayerId : null}
+              robberMode={iMoveRobber}
+              interactive={!isRolling && (iMoveRobber || (canAct && (isSetup || isPlacingFreeRoads || canBuild)))}
+            />
+          </ZoomableBoard>
         </section>
 
-        <aside className="hidden min-h-0 w-44 flex-none flex-col gap-1 overflow-x-hidden overflow-y-auto lg:flex">
+        <aside className="flex min-h-0 w-44 flex-none flex-col gap-1 overflow-x-hidden overflow-y-auto max-md:w-32 max-md:gap-0.5">
           <PhaseBanner
             game={game}
             currentPlayer={currentPlayer}
@@ -462,20 +467,20 @@ export default function App() {
       </div>
 
       {/* ---- Bottom: action bar + card hand (flex-none) ---- */}
-      <div className="flex w-full flex-none items-end gap-1 px-1 pb-1 pr-14 pt-0.5">
+      <div className="flex w-full flex-none items-end gap-1 px-1 pb-1 pr-14 pt-0.5 max-md:gap-0.5 max-md:px-0.5 max-md:pb-0.5 max-md:pr-12 max-md:pt-0">
         {/* Action bar */}
-        <section aria-label="Actions" className="panel-glass flex w-36 flex-none flex-col items-stretch gap-1 p-1.5">
+        <section aria-label="Actions" className="panel-glass flex w-36 flex-none flex-col items-stretch gap-1 p-1.5 max-md:w-28 max-md:p-1">
           <button
             type="button"
             onClick={() => setTradeOpenTurn(game?.turnNumber ?? 0)}
             disabled={!canBuild}
             title={!isMainGame ? 'Trading opens in the main game' : !isMyTurn ? 'Wait for your turn' : !hasRolled ? 'Roll the dice first' : 'Trade with players, the bank or your ports'}
-            className="group relative overflow-hidden rounded-md border border-amber-300/60 bg-gradient-to-b from-amber-200 via-amber-400 to-amber-600 px-3 py-1 font-display text-xs font-black uppercase tracking-[0.25em] text-ink-900 shadow-[0_0_14px_rgba(245,190,90,0.35)] ring-1 ring-amber-100/70 transition-all hover:brightness-110 hover:shadow-[0_0_22px_rgba(245,190,90,0.6)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="group relative overflow-hidden rounded-md border border-amber-300/60 bg-gradient-to-b from-amber-200 via-amber-400 to-amber-600 px-3 py-1 font-display text-xs font-black uppercase tracking-[0.25em] text-ink-900 shadow-[0_0_14px_rgba(245,190,90,0.35)] ring-1 ring-amber-100/70 transition-all hover:brightness-110 hover:shadow-[0_0_22px_rgba(245,190,90,0.6)] disabled:cursor-not-allowed disabled:opacity-40 max-md:px-2 max-md:py-0.5 max-md:text-[10px] max-md:tracking-[0.15em]"
           >
             <span className="relative z-10">Trade</span>
             <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
           </button>
-          <p className="truncate text-center text-[10px] italic leading-snug text-parchment-300/80">
+          <p className="truncate text-center text-[10px] italic leading-snug text-parchment-300/80 max-md:hidden">
             {activeOffer && activeOffer.senderPlayerId === myPlayerId
               ? 'Your offer is on the table.'
               : isMainGame && isMyTurn

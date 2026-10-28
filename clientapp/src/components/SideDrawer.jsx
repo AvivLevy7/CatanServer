@@ -111,7 +111,7 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
       {/* Floating rail */}
       <nav
         aria-label="Side panels"
-        className={`fixed right-3 top-1/2 z-[60] flex -translate-y-1/2 flex-col gap-2 transition-transform duration-300 ${
+        className={`fixed right-3 top-1/2 z-[60] flex -translate-y-1/2 flex-col gap-2 transition-transform duration-300 max-md:right-1.5 max-md:gap-1 ${
           open ? '-translate-x-80' : ''
         }`}
       >
@@ -126,7 +126,7 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
               title={tab.label}
               aria-label={tab.label}
               aria-pressed={active}
-              className={`relative flex size-12 items-center justify-center rounded-xl border text-xl shadow-xl backdrop-blur-md transition-all hover:scale-110 ${
+              className={`relative flex size-12 items-center justify-center rounded-xl border text-xl shadow-xl backdrop-blur-md transition-all hover:scale-110 max-md:size-9 max-md:rounded-lg max-md:text-base ${
                 active
                   ? 'border-amber-300 bg-amber-400/90 text-ink-900 shadow-amber-500/40'
                   : 'border-amber-700/50 bg-gray-900/85 text-parchment-100 hover:border-amber-400'
@@ -147,7 +147,7 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
           onClick={() => sound.toggleMuted()}
           title={muted ? 'Unmute sounds' : 'Mute sounds'}
           aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
-          className="flex size-12 items-center justify-center rounded-xl border border-amber-700/50 bg-gray-900/85 text-lg text-parchment-100 shadow-xl backdrop-blur-md transition-all hover:scale-110 hover:border-amber-400"
+          className="flex size-12 items-center justify-center rounded-xl border border-amber-700/50 bg-gray-900/85 text-lg text-parchment-100 shadow-xl backdrop-blur-md transition-all hover:scale-110 hover:border-amber-400 max-md:size-9 max-md:rounded-lg max-md:text-sm"
         >
           <span aria-hidden="true">{muted ? '\u{1F507}' : '\u{1F50A}'}</span>
         </button>
@@ -160,7 +160,7 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
       <aside
         aria-label={TABS.find((t) => t.id === open)?.label ?? 'Side panel'}
         aria-hidden={!open}
-        className={`fixed right-0 top-0 z-50 flex h-full w-80 flex-col border-l border-amber-700/50 bg-gray-900/90 p-4 shadow-2xl backdrop-blur-md transition-transform duration-300 ease-out ${
+        className={`fixed right-0 top-0 z-50 flex h-full w-80 max-w-[85vw] flex-col border-l border-amber-700/50 bg-gray-900/90 p-4 shadow-2xl backdrop-blur-md transition-transform duration-300 ease-out max-md:w-64 max-md:p-3 ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
