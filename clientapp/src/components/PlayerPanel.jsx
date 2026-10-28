@@ -26,7 +26,7 @@ function AchievementBadge({ label, title, className }) {
   );
 }
 
-function PlayerCard({ player, isCurrentTurn, hasLargestArmy, hasLongestRoad }) {
+function PlayerCard({ player, isCurrentTurn, isMe, hasLargestArmy, hasLongestRoad }) {
   const colors = PLAYER_COLORS[player.color] ?? PLAYER_COLORS.White;
 
   return (
@@ -40,6 +40,7 @@ function PlayerCard({ player, isCurrentTurn, hasLargestArmy, hasLongestRoad }) {
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={`inline-block size-3 rounded-full ${colors.dot}`} />
           <span className="font-semibold text-amber-50">{player.name}</span>
+          {isMe && <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-300">(you)</span>}
           {isCurrentTurn && (
             <span className="rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-stone-900">
               Turn
@@ -94,7 +95,7 @@ function PlayerCard({ player, isCurrentTurn, hasLargestArmy, hasLongestRoad }) {
   );
 }
 
-export default function PlayerPanel({ players, currentTurnPlayerId, largestArmyHolderId, longestRoadHolderId }) {
+export default function PlayerPanel({ players, currentTurnPlayerId, myPlayerId, largestArmyHolderId, longestRoadHolderId }) {
   return (
     <section aria-label="Players">
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-300">Players</h2>
@@ -104,6 +105,7 @@ export default function PlayerPanel({ players, currentTurnPlayerId, largestArmyH
             key={player.id}
             player={player}
             isCurrentTurn={player.id === currentTurnPlayerId}
+            isMe={player.id === myPlayerId}
             hasLargestArmy={player.id === largestArmyHolderId}
             hasLongestRoad={player.id === longestRoadHolderId}
           />

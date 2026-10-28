@@ -26,7 +26,8 @@ public sealed record NodeDto(
     string AnchorHexId,
     string AnchorCorner,
     Guid? OwnerId,
-    string Building);
+    string Building,
+    string Harbor);
 
 /// <summary>Wire format for a path between two intersections.</summary>
 public sealed record EdgeDto(

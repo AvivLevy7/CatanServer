@@ -9,6 +9,9 @@ import PhaseBanner from './components/PhaseBanner';
 import PlayerPanel from './components/PlayerPanel';
 import StealPicker from './components/StealPicker';
 import TradePanel from './components/TradePanel';
+import PlayerTradePanel from './components/PlayerTradePanel';
+import TradeOfferModal from './components/TradeOfferModal';
+import { LandingPage, WaitingRoom } from './components/Lobby';
 import { useGameHub } from './useGameHub';
 
 const RESOURCE_LABELS = {
@@ -54,6 +57,12 @@ function StatusScreen({ status, error }) {
 
 export default function App() {
   const {
+    room,
+    session,
+    myPlayerId,
+    createRoom,
+    joinRoom,
+    leaveRoom,
     board,
     game,
     lastRoll,
@@ -62,10 +71,16 @@ export default function App() {
     actionError,
     clearActionError,
     rollDice,
+    endTurn,
     buildSettlement,
     buildRoad,
     buildCity,
     tradeWithBank,
+    proposeTrade,
+    acceptTrade,
+    rejectTrade,
+    cancelTrade,
+    lastTradeResult,
     discardCards,
     moveRobber,
     getStealCandidates,
@@ -80,15 +95,37 @@ export default function App() {
     startGame,
   } = useGameHub();
   const [selected, setSelected] = useState(null);
-  const [playerCount, setPlayerCount] = useState(4);
   // Robber destination awaiting a steal-target choice.
   const [pendingRobber, setPendingRobber] = useState(null);
   // Action card awaiting its choice modal: { type, cardId }.
   const [pendingCard, setPendingCard] = useState(null);
 
-  // Hold the loading screen until the first BoardState arrives from the hub.
-  if (!board) {
+  const isLive = status === 'connected';
+
+  // Wait for the socket, then route: no room -> landing, lobby -> waiting room, in game -> board.
+  if (status === 'connecting' || status === 'error' || status === 'disconnected') {
     return <StatusScreen status={status} error={error} />;
+  }
+
+  if (!room || !session) {
+    return <LandingPage onCreate={createRoom} onJoin={joinRoom} disabled={!isLive} error={actionError} />;
+  }
+
+  if (room.status !== 'InGame') {
+    return (
+      <WaitingRoom
+        room={room}
+        myPlayerId={session.playerId}
+        onStart={startGame}
+        onLeave={leaveRoom}
+        disabled={!isLive}
+      />
+    );
+  }
+
+  // Game started but the first BoardState push has not landed yet.
+  if (!board) {
+    return <StatusScreen status="connecting" error={null} />;
   }
 
   // GameState carries the freshest board (with node/edge ownership and robber); BoardState is the fallback.
@@ -111,7 +148,6 @@ export default function App() {
   // Prefer the DiceRolled event (carries production); fall back to the snapshot's lastRoll.
   const roll = lastRoll?.roll ?? game?.lastRoll ?? null;
   const rolledBy = players.find((p) => p.id === lastRoll?.rolledBy) ?? null;
-  const isLive = status === 'connected';
 
   const playerColors = Object.fromEntries(players.map((p) => [p.id, p.color]));
 
@@ -124,35 +160,59 @@ export default function App() {
   const isMainGame = phase === 'MainGame';
   const winningPlayer = winner ?? players.find((p) => p.id === game?.winnerId) ?? null;
 
-  // Hot-seat: walk owing players one at a time, in seat order.
-  const pendingDiscards = game?.pendingDiscards ?? {};
-  const discardingPlayer = players.find((p) => pendingDiscards[p.id] != null) ?? null;
+  // Identity: this tab may only act as its own seat.
+  const me = players.find((p) => p.id === myPlayerId) ?? null;
+  const isMyTurn = myPlayerId != null && myPlayerId === currentTurnPlayerId;
   const robberMover = players.find((p) => p.id === game?.robberMoverId) ?? null;
+  const iMoveRobber = isMovingRobber && game?.robberMoverId === myPlayerId;
+  const canAct = isLive && isMyTurn;
+  // Server serialises GameStateDto.HasRolledDice as camelCase "hasRolledDice".
+  const hasRolled = game?.hasRolledDice === true;
+  // Build/trade need a roll first; dev cards do not (a pre-roll Knight is legal).
+  const canBuild = canAct && isMainGame && hasRolled;
+
+  // Discards: only this tab's own debt is shown here.
+  const pendingDiscards = game?.pendingDiscards ?? {};
+  const myDiscard = myPlayerId != null ? pendingDiscards[myPlayerId] ?? null : null;
+
+  // Trades: the sender sees a waiting view; only addressed recipients get Accept/Reject.
+  const activeOffer = game?.activeTradeOffer ?? null;
+  const offerSender = players.find((p) => p.id === activeOffer?.senderPlayerId) ?? null;
+  const iAmOfferRecipient =
+    !!activeOffer &&
+    activeOffer.senderPlayerId !== myPlayerId &&
+    (activeOffer.targetPlayerId == null || activeOffer.targetPlayerId === myPlayerId) &&
+    !(activeOffer.declinedBy ?? []).includes(myPlayerId);
+  const opponents = players.filter((p) => p.id !== myPlayerId);
 
   const handleNodeClick = (node) => {
+    if (!canAct) return;
     if (isSetup) {
       if (node.building === 'None') placeInitialSettlement(node.id);
       return;
     }
     if (!isMainGame) return;
+    if (!hasRolled) return;
 
     if (node.building === 'None') {
       buildSettlement(node.id);
-    } else if (node.building === 'Settlement' && node.ownerId === currentTurnPlayerId) {
+    } else if (node.building === 'Settlement' && node.ownerId === myPlayerId) {
       buildCity(node.id);
     }
   };
 
   const handleEdgeClick = (edge) => {
+    if (!canAct) return;
     if (edge.ownerId != null) return;
     if (isSetup) {
       placeInitialRoad(edge.id);
-    } else if (isMainGame || isPlacingFreeRoads) {
+    } else if (isPlacingFreeRoads || (isMainGame && hasRolled)) {
       buildRoad(edge.id);
     }
   };
 
   const handlePlayCard = (card) => {
+    if (!canAct) return;
     switch (card.type) {
       case 'Knight':
         playKnightCard(card.id);
@@ -175,7 +235,7 @@ export default function App() {
       return;
     }
 
-    if (tile.hasRobber) return;
+    if (!iMoveRobber || tile.hasRobber) return;
 
     const candidateIds = await getStealCandidates(tile.id);
     if (candidateIds.length === 0) {
@@ -191,13 +251,6 @@ export default function App() {
     const { hexId } = pendingRobber;
     setPendingRobber(null);
     await moveRobber(hexId, victimId);
-  };
-
-  const handleNewGame = () => {
-    startGame(playerCount);
-    setSelected(null);
-    setPendingRobber(null);
-    setPendingCard(null);
   };
 
   return (
@@ -218,6 +271,14 @@ export default function App() {
             }`}
           />
           {STATUS_LABELS[status] ?? status}
+          <span aria-hidden="true">&middot;</span>
+          Room <span className="font-mono font-bold text-amber-50">{room.roomId}</span>
+          {me && (
+            <>
+              <span aria-hidden="true">&middot;</span>
+              You are <span className="font-semibold text-amber-50">{me.name}</span>
+            </>
+          )}
         </p>
         {actionError && (
           <button
@@ -246,70 +307,75 @@ export default function App() {
             onTileSelect={handleTileSelect}
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
-            highlightNodeId={isSetup ? game?.pendingSetupSettlementNodeId ?? null : null}
-            upgradablePlayerId={isMainGame ? currentTurnPlayerId : null}
-            robberMode={isMovingRobber}
+            highlightNodeId={isSetup && isMyTurn ? game?.pendingSetupSettlementNodeId ?? null : null}
+            upgradablePlayerId={isMainGame && isMyTurn ? myPlayerId : null}
+            robberMode={iMoveRobber}
+            interactive={iMoveRobber || (canAct && (isSetup || isPlacingFreeRoads || canBuild))}
           />
 
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <fieldset className="flex items-center gap-1 rounded-lg bg-sky-800/70 p-1" aria-label="Number of players">
-              {[3, 4].map((count) => (
-                <button
-                  key={count}
-                  type="button"
-                  onClick={() => setPlayerCount(count)}
-                  aria-pressed={playerCount === count}
-                  className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
-                    playerCount === count
-                      ? 'bg-amber-100 text-stone-900 shadow'
-                      : 'text-amber-50 hover:bg-sky-700'
-                  }`}
-                >
-                  {count} players
-                </button>
-              ))}
-            </fieldset>
-
             <button
               type="button"
-              onClick={handleNewGame}
-              disabled={!isLive}
-              className="rounded-lg bg-amber-100 px-4 py-2 text-sm font-semibold text-stone-900 shadow transition hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={leaveRoom}
+              className="rounded-lg border border-amber-100/40 px-4 py-2 text-sm font-semibold text-amber-50 transition hover:bg-sky-800"
             >
-              New game (all players)
+              Leave room
             </button>
           </div>
         </section>
 
         <aside className="flex flex-col gap-4">
-          <PhaseBanner game={game} currentPlayer={currentPlayer} robberMover={robberMover} />
+          <PhaseBanner
+            game={game}
+            currentPlayer={currentPlayer}
+            robberMover={robberMover}
+            isMyTurn={isMovingRobber || isDiscarding ? iMoveRobber : isMyTurn}
+          />
           <DicePanel
             roll={roll}
             currentPlayer={currentPlayer}
             rolledBy={rolledBy}
             onRoll={rollDice}
-            disabled={!isLive || !isMainGame}
+            onEndTurn={endTurn}
+            isMyTurn={isMyTurn}
+            hasRolled={hasRolled}
+            canRoll={canAct && isMainGame && !hasRolled}
+            canEndTurn={canAct && isMainGame && hasRolled}
+            waitingOnRobber={isMovingRobber || isDiscarding}
           />
-          {isMainGame && (
+          {isMainGame && isMyTurn && (
             <TradePanel
-              player={currentPlayer}
+              player={me}
               onTrade={tradeWithBank}
-              disabled={!isLive}
+              disabled={!canBuild}
             />
           )}
-          {isMainGame && (
+          {isMainGame && isMyTurn && (
+            <PlayerTradePanel
+              player={me}
+              opponents={opponents}
+              activeOffer={activeOffer}
+              lastResult={lastTradeResult}
+              onPropose={proposeTrade}
+              onCancel={cancelTrade}
+              disabled={!canBuild}
+            />
+          )}
+          {isMainGame && me && (
             <DevCardPanel
-              player={currentPlayer}
+              player={me}
               deckRemaining={game?.developmentCardsRemaining}
               onBuy={buyDevelopmentCard}
               onPlay={handlePlayCard}
-              disabled={!isLive}
+              disabled={!canAct}
+              canBuy={canBuild}
             />
           )}
           {game ? (
             <PlayerPanel
               players={players}
               currentTurnPlayerId={currentTurnPlayerId}
+              myPlayerId={myPlayerId}
               largestArmyHolderId={game?.largestArmyHolderId}
               longestRoadHolderId={game?.longestRoadHolderId}
             />
@@ -319,16 +385,27 @@ export default function App() {
         </aside>
       </div>
 
-      {isDiscarding && discardingPlayer && (
+      {isDiscarding && me && myDiscard != null && (
         <DiscardModal
-          player={discardingPlayer}
-          owed={pendingDiscards[discardingPlayer.id]}
+          player={me}
+          owed={myDiscard}
           onDiscard={discardCards}
           disabled={!isLive}
         />
       )}
 
-      {pendingRobber && (
+      {isMainGame && activeOffer && iAmOfferRecipient && me && (
+        <TradeOfferModal
+          offer={activeOffer}
+          sender={offerSender}
+          recipient={me}
+          onAccept={acceptTrade}
+          onReject={rejectTrade}
+          disabled={!isLive}
+        />
+      )}
+
+      {pendingRobber && iMoveRobber && (
         <StealPicker
           candidates={players.filter((p) => pendingRobber.candidateIds.includes(p.id))}
           onPick={handleStealPick}
@@ -365,7 +442,7 @@ export default function App() {
         <GameOverOverlay
           winner={winningPlayer}
           players={players}
-          onNewGame={handleNewGame}
+          onNewGame={leaveRoom}
           disabled={!isLive}
         />
       )}

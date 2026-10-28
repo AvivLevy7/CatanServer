@@ -8,6 +8,9 @@ namespace CatanServer.Hubs;
 /// </summary>
 public interface IGameClient
 {
+    /// <summary>Lobby membership/status for the caller's room.</summary>
+    Task RoomState(RoomStateDto room);
+
     Task BoardState(BoardStateDto board);
 
     Task GameState(GameStateDto state);
@@ -17,6 +20,12 @@ public interface IGameClient
     Task RobberMoved(RobberMovedDto robber);
 
     Task GameOver(PlayerDto winner);
+
+    /// <summary>A new player-to-player offer is on the table.</summary>
+    Task TradeOffered(TradeOfferDto offer);
+
+    /// <summary>The offer was accepted, declined (by one or all) or withdrawn.</summary>
+    Task TradeResolved(TradeResolvedDto result);
 
     Task PlayerJoined(string connectionId);
 

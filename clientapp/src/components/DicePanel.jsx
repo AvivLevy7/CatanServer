@@ -32,7 +32,18 @@ function Die({ value }) {
   );
 }
 
-export default function DicePanel({ roll, currentPlayer, rolledBy, onRoll, disabled }) {
+export default function DicePanel({
+  roll,
+  currentPlayer,
+  rolledBy,
+  onRoll,
+  onEndTurn,
+  isMyTurn = true,
+  hasRolled = false,
+  canRoll = true,
+  canEndTurn = false,
+  waitingOnRobber = false,
+}) {
   const total = roll?.total;
 
   return (
@@ -41,7 +52,7 @@ export default function DicePanel({ roll, currentPlayer, rolledBy, onRoll, disab
       className="flex flex-col items-center gap-3 rounded-xl bg-sky-800/70 p-4"
     >
       <p className="text-xs font-semibold uppercase tracking-wide text-sky-300">
-        {currentPlayer ? `${currentPlayer.name}'s turn` : 'Waiting for players'}
+        {currentPlayer ? (isMyTurn ? 'Your turn' : `${currentPlayer.name}'s turn`) : 'Waiting for players'}
       </p>
 
       {roll ? (
@@ -65,14 +76,38 @@ export default function DicePanel({ roll, currentPlayer, rolledBy, onRoll, disab
         <p className="py-3 text-sm text-sky-200">No roll yet</p>
       )}
 
-      <button
-        type="button"
-        onClick={onRoll}
-        disabled={disabled}
-        className="rounded-lg bg-amber-100 px-4 py-2 text-sm font-semibold text-stone-900 shadow transition hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Roll Dice{currentPlayer ? ` (${currentPlayer.name})` : ''}
-      </button>
+      {isMyTurn ? (
+        <>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onRoll}
+              disabled={!canRoll}
+              title={waitingOnRobber ? 'Resolve the robber first' : hasRolled ? 'Already rolled this turn' : undefined}
+              className="rounded-lg bg-amber-100 px-4 py-2 text-sm font-semibold text-stone-900 shadow transition hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Roll Dice
+            </button>
+            {onEndTurn && (
+              <button
+                type="button"
+                onClick={onEndTurn}
+                disabled={!canEndTurn}
+                title={!hasRolled ? 'You must roll before ending your turn' : undefined}
+                className="rounded-lg border border-amber-100/40 px-4 py-2 text-sm font-semibold text-amber-50 transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                End Turn
+              </button>
+            )}
+          </div>
+          {waitingOnRobber && <p className="text-xs text-amber-200">Move the robber, then roll.</p>}
+          {!waitingOnRobber && !hasRolled && (
+            <p className="text-xs text-sky-300">You may play a development card before rolling.</p>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-sky-300">Waiting for {currentPlayer?.name ?? 'the other player'}...</p>
+      )}
     </section>
   );
 }

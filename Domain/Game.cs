@@ -50,7 +50,7 @@ public sealed class Game
     // Road Building: free roads still owed to the current player.
     private int _freeRoadsRemaining;
 
-    public Game(Guid id, BoardGraph board, IReadOnlyList<Player> players, Random? random = null)
+    public Game(Guid id, BoardGraph board, IReadOnlyList<Player> players, Random? random = null, bool allowSevens = true)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(players.Count, 2);
 
@@ -59,11 +59,15 @@ public sealed class Game
         _players = [.. players];
         _random = random ?? Random.Shared;
         _deck = new DevelopmentDeck(_random);
+        AllowSevens = allowSevens;
     }
 
     public Guid Id { get; }
 
     public BoardGraph Board { get; }
+
+    /// <summary>When false, a rolled 7 is rerolled so the robber never triggers from the dice.</summary>
+    public bool AllowSevens { get; }
 
     /// <summary>Increments each time the turn passes. Starts at 1 in MainGame.</summary>
     public int TurnNumber { get; private set; } = 1;
@@ -72,10 +76,19 @@ public sealed class Game
 
     public bool DevelopmentCardPlayedThisTurn => _developmentCardPlayedThisTurn;
 
+    /// <summary>
+    /// True once the current player has rolled. Building, trading and buying require it;
+    /// playing development cards does not. Reset to false whenever a new turn starts.
+    /// </summary>
+    public bool HasRolledDice { get; private set; }
+
     /// <summary>Victory points needed to win.</summary>
     public const int WinningVictoryPoints = 10;
 
     public Guid? WinnerId { get; private set; }
+
+    /// <summary>The single outstanding player-to-player offer, if any.</summary>
+    public TradeOffer? ActiveTradeOffer { get; private set; }
 
     public int FreeRoadsRemaining => _freeRoadsRemaining;
 
@@ -223,6 +236,7 @@ public sealed class Game
     {
         RequireMainGame();
         RequireTurn(playerId);
+        RequireRolled();
         RequireSettlementSupply(playerId);
 
         var node = RequireVacantNodeRespectingDistance(nodeId);
@@ -252,6 +266,7 @@ public sealed class Game
     {
         RequireMainGame();
         RequireTurn(playerId);
+        RequireRolled();
 
         if (_deck.Remaining == 0)
         {
@@ -380,6 +395,8 @@ public sealed class Game
         }
     }
 
+    // Development cards may be played before OR after rolling (a pre-roll Knight is
+    // a classic move), so this deliberately does not call RequireRolled.
     private (Player Player, DevelopmentCard Card) BeginPlayingCard(Guid playerId, Guid cardId, DevelopmentCardType expected)
     {
         RequireMainGame();
@@ -417,13 +434,14 @@ public sealed class Game
     }
 
     /// <summary>
-    /// 4:1 maritime trade with the bank. The current player gives four of one resource
-    /// and receives one of another. Harbour discounts are not applied yet.
+    /// Maritime trade with the bank. The rate depends on the harbours the player has built
+    /// on: 2:1 at a matching resource port, 3:1 at a generic port, otherwise 4:1.
     /// </summary>
     public void TradeWithBank(Guid playerId, ResourceType give, ResourceType receive)
     {
         RequireMainGame();
         RequireTurn(playerId);
+        RequireRolled();
 
         if (give == receive)
         {
@@ -431,13 +449,188 @@ public sealed class Game
         }
 
         var player = GetPlayer(playerId);
-        if (player.Resources[give] < TradeRates.Bank)
+        var rate = BankRateFor(playerId, give);
+        if (player.Resources[give] < rate)
         {
-            throw new GameRuleException($"You need {TradeRates.Bank} {give} to trade with the bank.");
+            throw new GameRuleException($"You need {rate} {give} to trade with the bank.");
         }
 
-        player.Pay(new Dictionary<ResourceType, int> { [give] = TradeRates.Bank });
+        player.Pay(new Dictionary<ResourceType, int> { [give] = rate });
         player.AddResources(receive, 1);
+    }
+
+    /// <summary>Best bank rate the player has for giving <paramref name="resource"/>.</summary>
+    public int BankRateFor(Guid playerId, ResourceType resource)
+    {
+        var harbors = Board.Nodes
+            .Where(node => node.OwnerId == playerId && node.Harbor != HarborType.None)
+            .Select(node => node.Harbor)
+            .ToHashSet();
+
+        if (harbors.Contains(HarborFor(resource)))
+        {
+            return TradeRates.ResourceHarbor;
+        }
+
+        return harbors.Contains(HarborType.Generic) ? TradeRates.GenericHarbor : TradeRates.Bank;
+    }
+
+    /// <summary>Best bank rate per resource for the player, for display.</summary>
+    public IReadOnlyDictionary<ResourceType, int> BankRates(Guid playerId) =>
+        Enum.GetValues<ResourceType>().ToDictionary(resource => resource, resource => BankRateFor(playerId, resource));
+
+    private static HarborType HarborFor(ResourceType resource) => resource switch
+    {
+        ResourceType.Brick => HarborType.Brick,
+        ResourceType.Lumber => HarborType.Lumber,
+        ResourceType.Ore => HarborType.Ore,
+        ResourceType.Grain => HarborType.Grain,
+        ResourceType.Wool => HarborType.Wool,
+        _ => HarborType.None
+    };
+
+    /// <summary>
+    /// Current player proposes a trade to one opponent or to everyone. Only one offer
+    /// can be outstanding at a time; proposing again replaces the previous one.
+    /// </summary>
+    public TradeOffer ProposeTrade(
+        Guid senderId,
+        Guid? targetId,
+        IReadOnlyDictionary<ResourceType, int> offered,
+        IReadOnlyDictionary<ResourceType, int> requested)
+    {
+        RequireMainGame();
+        RequireTurn(senderId);
+        RequireRolled();
+
+        var give = Normalise(offered);
+        var get = Normalise(requested);
+
+        if (give.Count == 0 && get.Count == 0)
+        {
+            throw new GameRuleException("An offer must include at least one resource.");
+        }
+
+        if (give.Keys.Intersect(get.Keys).Any())
+        {
+            throw new GameRuleException("You cannot offer and request the same resource.");
+        }
+
+        if (targetId is { } target)
+        {
+            if (target == senderId)
+            {
+                throw new GameRuleException("You cannot trade with yourself.");
+            }
+
+            GetPlayer(target);
+        }
+
+        var sender = GetPlayer(senderId);
+        if (!sender.CanAfford(give))
+        {
+            throw new GameRuleException("You do not have the resources you are offering.");
+        }
+
+        ActiveTradeOffer = new TradeOffer(senderId, targetId, give, get);
+        return ActiveTradeOffer;
+    }
+
+    /// <summary>
+    /// <paramref name="accepterId"/> accepts the outstanding offer. Both sides are re-checked
+    /// because hands may have changed since the offer was made.
+    /// </summary>
+    public TradeOffer AcceptTrade(Guid accepterId, Guid offerId)
+    {
+        RequireMainGame();
+        var offer = RequireOffer(offerId);
+
+        if (!offer.IsAddressedTo(accepterId))
+        {
+            throw new GameRuleException("This offer was not made to you.");
+        }
+
+        var sender = GetPlayer(offer.SenderPlayerId);
+        var accepter = GetPlayer(accepterId);
+
+        if (!sender.CanAfford(offer.ResourcesOffered))
+        {
+            ActiveTradeOffer = null;
+            throw new GameRuleException($"{sender.Name} no longer has the offered resources.");
+        }
+
+        if (!accepter.CanAfford(offer.ResourcesRequested))
+        {
+            throw new GameRuleException("You do not have the requested resources.");
+        }
+
+        sender.Pay(offer.ResourcesOffered);
+        accepter.Pay(offer.ResourcesRequested);
+        foreach (var (type, amount) in offer.ResourcesOffered)
+        {
+            accepter.AddResources(type, amount);
+        }
+
+        foreach (var (type, amount) in offer.ResourcesRequested)
+        {
+            sender.AddResources(type, amount);
+        }
+
+        ActiveTradeOffer = null;
+        return offer;
+    }
+
+    /// <summary>
+    /// Declines the offer. A targeted offer is removed immediately; an open offer is
+    /// removed once every opponent has declined. Returns true when the offer is gone.
+    /// </summary>
+    public bool RejectTrade(Guid rejecterId, Guid offerId)
+    {
+        var offer = RequireOffer(offerId);
+
+        if (!offer.IsAddressedTo(rejecterId))
+        {
+            throw new GameRuleException("This offer was not made to you.");
+        }
+
+        offer.Decline(rejecterId);
+
+        var everyoneDeclined = !offer.IsOpen
+            || _players.All(p => p.Id == offer.SenderPlayerId || offer.DeclinedBy.Contains(p.Id));
+
+        if (everyoneDeclined)
+        {
+            ActiveTradeOffer = null;
+        }
+
+        return everyoneDeclined;
+    }
+
+    /// <summary>The proposer withdraws their own offer.</summary>
+    public void CancelTrade(Guid senderId, Guid offerId)
+    {
+        var offer = RequireOffer(offerId);
+        if (offer.SenderPlayerId != senderId)
+        {
+            throw new GameRuleException("Only the proposer can withdraw an offer.");
+        }
+
+        ActiveTradeOffer = null;
+    }
+
+    private TradeOffer RequireOffer(Guid offerId) =>
+        ActiveTradeOffer is { } offer && offer.OfferId == offerId
+            ? offer
+            : throw new GameRuleException("That trade offer is no longer available.");
+
+    private static Dictionary<ResourceType, int> Normalise(IReadOnlyDictionary<ResourceType, int> bundle)
+    {
+        if (bundle.Any(pair => pair.Value < 0))
+        {
+            throw new GameRuleException("Resource amounts cannot be negative.");
+        }
+
+        return bundle.Where(pair => pair.Value > 0).ToDictionary(pair => pair.Key, pair => pair.Value);
     }
 
     /// <summary>
@@ -448,6 +641,7 @@ public sealed class Game
     {
         RequireMainGame();
         RequireTurn(playerId);
+        RequireRolled();
 
         if (!Board.TryGetNode(nodeId, out var node))
         {
@@ -487,6 +681,7 @@ public sealed class Game
     {
         RequireMainGame();
         RequireTurn(playerId);
+        RequireRolled();
         RequireRoadSupply(playerId);
 
         var edge = RequireBuildableRoadEdge(playerId, edgeId);
@@ -593,13 +788,22 @@ public sealed class Game
     /// turn to the next player. Each player gets exactly one roll per turn.
     /// The robber (a roll of 7) is not handled yet.
     /// </summary>
-    public RollOutcome RollDice()
+    public RollOutcome RollDice() => RollDice(CurrentTurnPlayerId);
+
+    public RollOutcome RollDice(Guid playerId)
     {
         RequireMainGame();
+        RequireTurn(playerId);
+
+        if (HasRolledDice)
+        {
+            throw new GameRuleException("You have already rolled this turn.");
+        }
 
         var roller = CurrentTurnPlayerId;
-        var roll = DiceRoll.Roll(_random);
+        var roll = DiceRoll.Roll(_random, AllowSevens);
         LastRoll = roll;
+        HasRolledDice = true;
 
         if (roll.ActivatesRobber)
         {
@@ -608,8 +812,6 @@ public sealed class Game
         }
 
         var production = DistributeResources(roll.Total);
-        AdvanceTurn();
-
         return new RollOutcome(roller, roll, production);
     }
 
@@ -701,16 +903,10 @@ public sealed class Game
         hex.HasRobber = true;
 
         _robberMover = null;
+        _robberFromKnight = false;
+        // Back to the mover's turn. If the Knight was played before rolling,
+        // HasRolledDice is still false so they must roll before ending.
         Phase = GamePhase.MainGame;
-
-        if (_robberFromKnight)
-        {
-            _robberFromKnight = false;
-        }
-        else
-        {
-            AdvanceTurn();
-        }
 
         return stolen;
     }
@@ -760,9 +956,13 @@ public sealed class Game
         return new ResourceGrant(to.Id, resource, 1);
     }
 
-    public Player EndTurn()
+    public Player EndTurn() => EndTurn(CurrentTurnPlayerId);
+
+    public Player EndTurn(Guid playerId)
     {
         RequireMainGame();
+        RequireTurn(playerId);
+        RequireRolled();
         AdvanceTurn();
         return CurrentPlayer;
     }
@@ -772,6 +972,8 @@ public sealed class Game
         _currentTurnIndex = (_currentTurnIndex + 1) % _players.Count;
         TurnNumber++;
         _developmentCardPlayedThisTurn = false;
+        HasRolledDice = false;
+        ActiveTradeOffer = null;
     }
 
     /// <summary>
@@ -808,6 +1010,14 @@ public sealed class Game
         if (playerId != CurrentTurnPlayerId)
         {
             throw new GameRuleException("It is not your turn.");
+        }
+    }
+
+    private void RequireRolled()
+    {
+        if (!HasRolledDice)
+        {
+            throw new GameRuleException("Roll the dice first.");
         }
     }
 

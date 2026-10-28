@@ -27,6 +27,12 @@ public static class TradeRates
 {
     /// <summary>Resources given per one received when no harbour applies.</summary>
     public const int Bank = 4;
+
+    /// <summary>Rate at a generic (3:1) harbour.</summary>
+    public const int GenericHarbor = 3;
+
+    /// <summary>Rate at a resource-specific (2:1) harbour, for that resource only.</summary>
+    public const int ResourceHarbor = 2;
 }
 
 /// <summary>Standard building costs.</summary>

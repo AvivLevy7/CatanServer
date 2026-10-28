@@ -21,8 +21,8 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddSignalR();
 
-// Single shared board held in memory for the whole process.
-builder.Services.AddSingleton<IGameStateService, GameStateService>();
+// One RoomManager for the process; each room owns its own GameStateService.
+builder.Services.AddSingleton<RoomManager>();
 
 builder.Services.AddCors(options =>
 {

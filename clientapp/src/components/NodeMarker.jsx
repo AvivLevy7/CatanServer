@@ -34,9 +34,12 @@ export default function NodeMarker({ node, x, y, ownerColor, upgradable = false,
       role="button"
       tabIndex={0}
       aria-label={
-        isEmpty
+        (isEmpty
           ? 'Empty intersection'
-          : `${node.building} owned by ${ownerColor}${upgradable ? ', click to upgrade to a city' : ''}`
+          : `${node.building} owned by ${ownerColor}${upgradable ? ', click to upgrade to a city' : ''}`) +
+        (node.harbor && node.harbor !== 'None'
+          ? ` (${node.harbor === 'Generic' ? '3:1' : `2:1 ${node.harbor}`} port)`
+          : '')
       }
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {

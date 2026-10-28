@@ -12,7 +12,7 @@ const DEV_CARD_COST = 'Ore + Wheat + Sheep';
  * The current player's development cards with buy/play controls. Only Knights are
  * playable for now; the other action cards are shown but inert until implemented.
  */
-export default function DevCardPanel({ player, deckRemaining, onBuy, onPlay, disabled }) {
+export default function DevCardPanel({ player, deckRemaining, onBuy, onPlay, disabled, canBuy = !disabled }) {
   const cards = player?.developmentCards ?? [];
   const unplayed = cards.filter((c) => !c.isPlayed);
   const played = cards.filter((c) => c.isPlayed);
@@ -30,8 +30,8 @@ export default function DevCardPanel({ player, deckRemaining, onBuy, onPlay, dis
       <button
         type="button"
         onClick={onBuy}
-        disabled={disabled || !canAfford || deckRemaining === 0}
-        title={DEV_CARD_COST}
+        disabled={!canBuy || !canAfford || deckRemaining === 0}
+        title={!canBuy && !disabled ? 'Roll the dice before buying' : DEV_CARD_COST}
         className="w-full rounded-lg bg-amber-100 px-4 py-2 text-sm font-semibold text-stone-900 shadow transition hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
       >
         Buy Dev Card <span className="font-normal text-stone-600">({DEV_CARD_COST})</span>

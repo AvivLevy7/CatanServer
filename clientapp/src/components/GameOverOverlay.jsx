@@ -55,7 +55,7 @@ export default function GameOverOverlay({ winner, players, onNewGame, disabled }
           disabled={disabled}
           className="mt-6 w-full rounded-lg bg-amber-100 px-4 py-2.5 text-sm font-semibold text-stone-900 shadow transition hover:bg-amber-50 disabled:opacity-50"
         >
-          Start a new game
+          Back to lobby
         </button>
       </div>
     </div>

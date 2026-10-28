@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import HexTile from './HexTile';
 import NodeMarker from './NodeMarker';
 import EdgeMarker from './EdgeMarker';
+import PortMarker from './PortMarker';
 import { ROW_LENGTHS } from '../boardData';
 import { HEX_SIZE, HEX_WIDTH, VERTICAL_STEP, cornerPosition } from '../hexGeometry';
 
@@ -9,8 +10,8 @@ import { HEX_SIZE, HEX_WIDTH, VERTICAL_STEP, cornerPosition } from '../hexGeomet
 const BOARD_WIDTH = Math.max(...ROW_LENGTHS) * HEX_WIDTH;
 const BOARD_HEIGHT = (ROW_LENGTHS.length - 1) * VERTICAL_STEP + 2 * HEX_SIZE;
 
-// Breathing room so hover scaling and stroke widths never clip at the edges.
-const PADDING = 14;
+// Breathing room so hover scaling, stroke widths and port badges never clip at the edges.
+const PADDING = 48;
 
 export default function Board({
   tiles,
@@ -24,6 +25,7 @@ export default function Board({
   highlightNodeId = null,
   upgradablePlayerId = null,
   robberMode = false,
+  interactive = true,
 }) {
   // Every node is anchored to a real hex corner, so its position is exactly the
   // same formula HexTile uses to draw that corner - no drift between layers.
@@ -38,6 +40,30 @@ export default function Board({
     }
     return positions;
   }, [tiles, nodes]);
+
+  // A port is an edge whose two intersections carry the same harbour. Its badge is
+  // pushed outward from the board centre so it sits in the sea.
+  const ports = useMemo(() => {
+    const harborById = new Map(nodes.map((n) => [n.id, n.harbor]));
+    const centre = { x: BOARD_WIDTH / 2, y: BOARD_HEIGHT / 2 };
+    const result = [];
+    for (const edge of edges) {
+      const harbor = harborById.get(edge.nodeAId);
+      if (!harbor || harbor === 'None' || harbor !== harborById.get(edge.nodeBId)) continue;
+      const from = nodePositions.get(edge.nodeAId);
+      const to = nodePositions.get(edge.nodeBId);
+      if (!from || !to) continue;
+      const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+      result.push({
+        id: edge.id,
+        harbor,
+        from,
+        to,
+        seaward: { x: mid.x - centre.x, y: mid.y - centre.y },
+      });
+    }
+    return result;
+  }, [edges, nodes, nodePositions]);
 
   return (
     <svg
@@ -58,7 +84,13 @@ export default function Board({
         ))}
       </g>
 
-      <g aria-label="Paths" className={robberMode ? 'pointer-events-none' : undefined}>
+      <g aria-label="Ports">
+        {ports.map((port) => (
+          <PortMarker key={port.id} harbor={port.harbor} from={port.from} to={port.to} seaward={port.seaward} />
+        ))}
+      </g>
+
+      <g aria-label="Paths" className={robberMode || !interactive ? 'pointer-events-none' : undefined}>
         {edges.map((edge) => {
           const from = nodePositions.get(edge.nodeAId);
           const to = nodePositions.get(edge.nodeBId);
@@ -81,7 +113,7 @@ export default function Board({
         })}
       </g>
 
-      <g aria-label="Intersections" className={robberMode ? 'pointer-events-none' : undefined}>
+      <g aria-label="Intersections" className={robberMode || !interactive ? 'pointer-events-none' : undefined}>
         {nodes.map((node) => {
           const pos = nodePositions.get(node.id);
           if (!pos) return null;

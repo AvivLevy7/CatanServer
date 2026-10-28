@@ -15,52 +15,54 @@ public interface IGameStateService
 
     GameStateDto GetGameState();
 
-    /// <summary>Rolls for the current player, distributes production and returns both the event and the new state.</summary>
-    (DiceRolledDto Roll, GameStateDto State) RollDice();
+    /// <summary>Rolls for <paramref name="actorId"/> (must be the current player).</summary>
+    (DiceRolledDto Roll, GameStateDto State) RollDice(Guid actorId);
 
-    GameStateDto EndTurn();
+    GameStateDto EndTurn(Guid actorId);
 
-    /// <summary>Builds a settlement for the current player. Throws <see cref="GameRuleException"/> on an illegal move.</summary>
-    GameStateDto BuildSettlement(string nodeId);
+    GameStateDto BuildSettlement(Guid actorId, string nodeId);
 
-    /// <summary>Builds a road for the current player. Throws <see cref="GameRuleException"/> on an illegal move.</summary>
-    GameStateDto BuildRoad(string edgeId);
+    GameStateDto BuildRoad(Guid actorId, string edgeId);
 
-    /// <summary>Upgrades the current player's settlement to a city. Throws <see cref="GameRuleException"/> on an illegal move.</summary>
-    GameStateDto BuildCity(string nodeId);
+    GameStateDto BuildCity(Guid actorId, string nodeId);
 
-    /// <summary>4:1 bank trade for the current player. Throws <see cref="GameRuleException"/> on an illegal trade.</summary>
-    GameStateDto TradeWithBank(string resourceToGive, string resourceToReceive);
+    GameStateDto TradeWithBank(Guid actorId, string resourceToGive, string resourceToReceive);
 
-    /// <summary>After a 7: a player discards the cards they owe.</summary>
-    GameStateDto DiscardCards(Guid playerId, IReadOnlyDictionary<string, int> cards);
+    (TradeOfferDto Offer, GameStateDto State) ProposeTrade(Guid actorId, Guid? targetPlayerId, IReadOnlyDictionary<string, int> offered, IReadOnlyDictionary<string, int> requested);
 
-    /// <summary>After a 7: the roller moves the robber and optionally steals from an adjacent opponent.</summary>
-    (RobberMovedDto Event, GameStateDto State) MoveRobber(string hexId, Guid? victimId);
+    (TradeOfferDto Offer, GameStateDto State) AcceptTrade(Guid actorId, Guid offerId);
 
-    /// <summary>Opponents the current robber-mover could steal from if the robber landed on <paramref name="hexId"/>.</summary>
+    (TradeOfferDto Offer, bool Removed, GameStateDto State) RejectTrade(Guid actorId, Guid offerId);
+
+    GameStateDto CancelTrade(Guid actorId, Guid offerId);
+
+    /// <summary>After a 7: the actor discards the cards they owe.</summary>
+    GameStateDto DiscardCards(Guid actorId, IReadOnlyDictionary<string, int> cards);
+
+    /// <summary>After a 7 or a Knight: the actor (must be the robber mover) moves the robber.</summary>
+    (RobberMovedDto Event, GameStateDto State) MoveRobber(Guid actorId, string hexId, Guid? victimId);
+
     IReadOnlyList<Guid> GetStealCandidates(string hexId);
 
-    /// <summary>Current player buys a development card (1 Ore, 1 Wheat, 1 Sheep).</summary>
-    GameStateDto BuyDevelopmentCard();
+    GameStateDto BuyDevelopmentCard(Guid actorId);
 
-    /// <summary>Current player plays a Knight, entering the robber-moving phase.</summary>
-    GameStateDto PlayKnightCard(Guid cardId);
+    GameStateDto PlayKnightCard(Guid actorId, Guid cardId);
 
-    GameStateDto PlayMonopoly(Guid cardId, string resource);
+    GameStateDto PlayMonopoly(Guid actorId, Guid cardId, string resource);
 
-    GameStateDto PlayYearOfPlenty(Guid cardId, string first, string second);
+    GameStateDto PlayYearOfPlenty(Guid actorId, Guid cardId, string first, string second);
 
-    GameStateDto PlayRoadBuilding(Guid cardId);
+    GameStateDto PlayRoadBuilding(Guid actorId, Guid cardId);
 
-    /// <summary>Setup phase: free settlement for the current player.</summary>
-    GameStateDto PlaceInitialSettlement(string nodeId);
+    GameStateDto PlaceInitialSettlement(Guid actorId, string nodeId);
 
-    /// <summary>Setup phase: free road attached to the settlement just placed.</summary>
-    GameStateDto PlaceInitialRoad(string edgeId);
+    GameStateDto PlaceInitialRoad(Guid actorId, string edgeId);
 
     /// <summary>Starts a fresh game on a new board with the given number of seats (3 or 4).</summary>
-    GameStateDto StartGame(int playerCount);
+    GameStateDto StartGame(int playerCount, bool allowSevens = true);
+
+    /// <summary>Starts a fresh game for the given named seats (lobby flow).</summary>
+    GameStateDto StartGame(IReadOnlyList<(Guid Id, string Name, PlayerColor Color)> seats, bool allowSevens = true);
 }
 
 /// <summary>
@@ -89,11 +91,12 @@ public sealed class GameStateService : IGameStateService
     private BoardSnapshot _snapshot;
     private Game _game;
     private int _playerCount = MaxPlayers;
+    private bool _allowSevens = true;
 
     public GameStateService()
     {
         _snapshot = CreateSnapshot();
-        _game = CreateGame(_snapshot, _playerCount);
+        _game = CreateGame(_snapshot, _playerCount, _allowSevens);
     }
 
     public Guid BoardId => Volatile.Read(ref _snapshot).Id;
@@ -114,24 +117,41 @@ public sealed class GameStateService : IGameStateService
         {
             var snapshot = CreateSnapshot();
             Volatile.Write(ref _snapshot, snapshot);
-            _game = CreateGame(snapshot, _playerCount);
+            _game = CreateGame(snapshot, _playerCount, _allowSevens);
             return Project(snapshot.Id, snapshot.Board);
         }
     }
 
-    public GameStateDto StartGame(int playerCount)
+    public GameStateDto StartGame(int playerCount, bool allowSevens = true)
     {
         if (playerCount is < MinPlayers or > MaxPlayers)
         {
             throw new GameRuleException($"Choose between {MinPlayers} and {MaxPlayers} players.");
         }
 
+        var seats = DefaultSeats
+            .Take(playerCount)
+            .Select(seat => (Guid.NewGuid(), seat.Name, seat.Color))
+            .ToList();
+
+        return StartGame(seats, allowSevens);
+    }
+
+    public GameStateDto StartGame(IReadOnlyList<(Guid Id, string Name, PlayerColor Color)> seats, bool allowSevens = true)
+    {
+        if (seats.Count is < MinPlayers or > MaxPlayers)
+        {
+            throw new GameRuleException($"A game needs between {MinPlayers} and {MaxPlayers} players.");
+        }
+
         lock (_gate)
         {
-            _playerCount = playerCount;
+            _playerCount = seats.Count;
+            _allowSevens = allowSevens;
             var snapshot = CreateSnapshot();
             Volatile.Write(ref _snapshot, snapshot);
-            _game = CreateGame(snapshot, playerCount);
+            var players = seats.Select(seat => new Player(seat.Id, seat.Name, seat.Color)).ToArray();
+            _game = new Game(snapshot.Id, snapshot.Board, players, allowSevens: allowSevens);
             return ProjectGame(_game);
         }
     }
@@ -144,38 +164,38 @@ public sealed class GameStateService : IGameStateService
         }
     }
 
-    public (DiceRolledDto Roll, GameStateDto State) RollDice()
+    public (DiceRolledDto Roll, GameStateDto State) RollDice(Guid actorId)
     {
         lock (_gate)
         {
-            var outcome = _game.RollDice();
+            var outcome = _game.RollDice(actorId);
             return (ProjectRoll(outcome), ProjectGame(_game));
         }
     }
 
-    public GameStateDto EndTurn()
+    public GameStateDto EndTurn(Guid actorId)
     {
         lock (_gate)
         {
-            _game.EndTurn();
+            _game.EndTurn(actorId);
             return ProjectGame(_game);
         }
     }
 
-    public GameStateDto BuildSettlement(string nodeId)
+    public GameStateDto BuildSettlement(Guid actorId, string nodeId)
     {
         lock (_gate)
         {
             var node = _game.Board.FindNode(nodeId)
                 ?? throw new GameRuleException("That intersection is not on the board.");
 
-            _game.BuildSettlement(_game.CurrentTurnPlayerId, node.Id);
+            _game.BuildSettlement(actorId, node.Id);
             _game.CheckForWinner();
             return ProjectGame(_game);
         }
     }
 
-    public GameStateDto BuildRoad(string edgeId)
+    public GameStateDto BuildRoad(Guid actorId, string edgeId)
     {
         lock (_gate)
         {
@@ -184,11 +204,11 @@ public sealed class GameStateService : IGameStateService
 
             if (_game.Phase == GamePhase.PlacingFreeRoads)
             {
-                _game.PlaceFreeRoad(_game.CurrentTurnPlayerId, edge.Id);
+                _game.PlaceFreeRoad(actorId, edge.Id);
             }
             else
             {
-                _game.BuildRoad(_game.CurrentTurnPlayerId, edge.Id);
+                _game.BuildRoad(actorId, edge.Id);
             }
 
             _game.CheckForWinner();
@@ -196,27 +216,27 @@ public sealed class GameStateService : IGameStateService
         }
     }
 
-    public GameStateDto BuildCity(string nodeId)
+    public GameStateDto BuildCity(Guid actorId, string nodeId)
     {
         lock (_gate)
         {
             var node = _game.Board.FindNode(nodeId)
                 ?? throw new GameRuleException("That intersection is not on the board.");
 
-            _game.BuildCity(_game.CurrentTurnPlayerId, node.Id);
+            _game.BuildCity(actorId, node.Id);
             _game.CheckForWinner();
             return ProjectGame(_game);
         }
     }
 
-    public GameStateDto TradeWithBank(string resourceToGive, string resourceToReceive)
+    public GameStateDto TradeWithBank(Guid actorId, string resourceToGive, string resourceToReceive)
     {
         var give = ParseResource(resourceToGive);
         var receive = ParseResource(resourceToReceive);
 
         lock (_gate)
         {
-            _game.TradeWithBank(_game.CurrentTurnPlayerId, give, receive);
+            _game.TradeWithBank(actorId, give, receive);
             return ProjectGame(_game);
         }
     }
@@ -226,7 +246,65 @@ public sealed class GameStateService : IGameStateService
             ? resource
             : throw new GameRuleException($"'{name}' is not a resource.");
 
-    public GameStateDto DiscardCards(Guid playerId, IReadOnlyDictionary<string, int> cards)
+    private static Dictionary<ResourceType, int> ParseBundle(IReadOnlyDictionary<string, int> bundle) =>
+        bundle
+            .Where(pair => pair.Value != 0)
+            .ToDictionary(pair => ParseResource(pair.Key), pair => pair.Value);
+
+    public (TradeOfferDto Offer, GameStateDto State) ProposeTrade(
+        Guid actorId,
+        Guid? targetPlayerId,
+        IReadOnlyDictionary<string, int> offered,
+        IReadOnlyDictionary<string, int> requested)
+    {
+        var give = ParseBundle(offered);
+        var get = ParseBundle(requested);
+
+        lock (_gate)
+        {
+            var offer = _game.ProposeTrade(actorId, targetPlayerId, give, get);
+            return (ProjectOffer(offer), ProjectGame(_game));
+        }
+    }
+
+    public (TradeOfferDto Offer, GameStateDto State) AcceptTrade(Guid actorId, Guid offerId)
+    {
+        lock (_gate)
+        {
+            var offer = _game.AcceptTrade(actorId, offerId);
+            return (ProjectOffer(offer), ProjectGame(_game));
+        }
+    }
+
+    public (TradeOfferDto Offer, bool Removed, GameStateDto State) RejectTrade(Guid actorId, Guid offerId)
+    {
+        lock (_gate)
+        {
+            var offer = _game.ActiveTradeOffer;
+            var removed = _game.RejectTrade(actorId, offerId);
+            return (ProjectOffer(offer!), removed, ProjectGame(_game));
+        }
+    }
+
+    public GameStateDto CancelTrade(Guid actorId, Guid offerId)
+    {
+        lock (_gate)
+        {
+            _game.CancelTrade(actorId, offerId);
+            return ProjectGame(_game);
+        }
+    }
+
+    private static TradeOfferDto ProjectOffer(TradeOffer offer) =>
+        new(
+            offer.OfferId,
+            offer.SenderPlayerId,
+            offer.TargetPlayerId,
+            offer.ResourcesOffered.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
+            offer.ResourcesRequested.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
+            offer.DeclinedBy.ToList());
+
+    public GameStateDto DiscardCards(Guid actorId, IReadOnlyDictionary<string, int> cards)
     {
         var parsed = cards
             .Where(pair => pair.Value != 0)
@@ -234,12 +312,12 @@ public sealed class GameStateService : IGameStateService
 
         lock (_gate)
         {
-            _game.DiscardCards(playerId, parsed);
+            _game.DiscardCards(actorId, parsed);
             return ProjectGame(_game);
         }
     }
 
-    public (RobberMovedDto Event, GameStateDto State) MoveRobber(string hexId, Guid? victimId)
+    public (RobberMovedDto Event, GameStateDto State) MoveRobber(Guid actorId, string hexId, Guid? victimId)
     {
         var target = ParseHexId(hexId);
 
@@ -247,6 +325,11 @@ public sealed class GameStateService : IGameStateService
         {
             var mover = _game.RobberMover
                 ?? throw new GameRuleException("The robber cannot be moved right now.");
+
+            if (mover != actorId)
+            {
+                throw new GameRuleException("Only the player who triggered the robber can move it.");
+            }
 
             var stolen = _game.MoveRobber(mover, target, victimId);
             var evt = new RobberMovedDto(mover, hexId, victimId, stolen?.Resource.ToString());
@@ -267,52 +350,52 @@ public sealed class GameStateService : IGameStateService
         }
     }
 
-    public GameStateDto BuyDevelopmentCard()
+    public GameStateDto BuyDevelopmentCard(Guid actorId)
     {
         lock (_gate)
         {
-            _game.BuyDevelopmentCard(_game.CurrentTurnPlayerId);
+            _game.BuyDevelopmentCard(actorId);
             _game.CheckForWinner();
             return ProjectGame(_game);
         }
     }
 
-    public GameStateDto PlayKnightCard(Guid cardId)
+    public GameStateDto PlayKnightCard(Guid actorId, Guid cardId)
     {
         lock (_gate)
         {
-            _game.PlayKnightCard(_game.CurrentTurnPlayerId, cardId);
+            _game.PlayKnightCard(actorId, cardId);
             _game.CheckForWinner();
             return ProjectGame(_game);
         }
     }
 
-    public GameStateDto PlayMonopoly(Guid cardId, string resource)
+    public GameStateDto PlayMonopoly(Guid actorId, Guid cardId, string resource)
     {
         var parsed = ParseResource(resource);
         lock (_gate)
         {
-            _game.PlayMonopoly(_game.CurrentTurnPlayerId, cardId, parsed);
+            _game.PlayMonopoly(actorId, cardId, parsed);
             return ProjectGame(_game);
         }
     }
 
-    public GameStateDto PlayYearOfPlenty(Guid cardId, string first, string second)
+    public GameStateDto PlayYearOfPlenty(Guid actorId, Guid cardId, string first, string second)
     {
         var a = ParseResource(first);
         var b = ParseResource(second);
         lock (_gate)
         {
-            _game.PlayYearOfPlenty(_game.CurrentTurnPlayerId, cardId, a, b);
+            _game.PlayYearOfPlenty(actorId, cardId, a, b);
             return ProjectGame(_game);
         }
     }
 
-    public GameStateDto PlayRoadBuilding(Guid cardId)
+    public GameStateDto PlayRoadBuilding(Guid actorId, Guid cardId)
     {
         lock (_gate)
         {
-            _game.PlayRoadBuilding(_game.CurrentTurnPlayerId, cardId);
+            _game.PlayRoadBuilding(actorId, cardId);
             return ProjectGame(_game);
         }
     }
@@ -328,26 +411,26 @@ public sealed class GameStateService : IGameStateService
         throw new GameRuleException($"'{hexId}' is not a tile.");
     }
 
-    public GameStateDto PlaceInitialSettlement(string nodeId)
+    public GameStateDto PlaceInitialSettlement(Guid actorId, string nodeId)
     {
         lock (_gate)
         {
             var node = _game.Board.FindNode(nodeId)
                 ?? throw new GameRuleException("That intersection is not on the board.");
 
-            _game.PlaceInitialSettlement(_game.CurrentTurnPlayerId, node.Id);
+            _game.PlaceInitialSettlement(actorId, node.Id);
             return ProjectGame(_game);
         }
     }
 
-    public GameStateDto PlaceInitialRoad(string edgeId)
+    public GameStateDto PlaceInitialRoad(Guid actorId, string edgeId)
     {
         lock (_gate)
         {
             var edge = _game.Board.FindEdge(edgeId)
                 ?? throw new GameRuleException("That path is not on the board.");
 
-            _game.PlaceInitialRoad(_game.CurrentTurnPlayerId, edge.Id);
+            _game.PlaceInitialRoad(actorId, edge.Id);
             return ProjectGame(_game);
         }
     }
@@ -355,14 +438,14 @@ public sealed class GameStateService : IGameStateService
     private static BoardSnapshot CreateSnapshot() =>
         new(Guid.NewGuid(), BoardFactory.CreateStandardBoard());
 
-    private static Game CreateGame(BoardSnapshot snapshot, int playerCount)
+    private static Game CreateGame(BoardSnapshot snapshot, int playerCount, bool allowSevens)
     {
         var players = DefaultSeats
             .Take(playerCount)
             .Select(seat => new Player(Guid.NewGuid(), seat.Name, seat.Color))
             .ToArray();
 
-        return new Game(snapshot.Id, snapshot.Board, players);
+        return new Game(snapshot.Id, snapshot.Board, players, allowSevens: allowSevens);
     }
 
     private static GameStateDto ProjectGame(Game game)
@@ -388,7 +471,8 @@ public sealed class GameStateService : IGameStateService
                                     && card.CanPlayOnTurn(game.TurnNumber)))
                     .ToList(),
                 player.KnightsPlayed,
-                game.RoadLengths.GetValueOrDefault(player.Id)))
+                game.RoadLengths.GetValueOrDefault(player.Id),
+                game.BankRates(player.Id).ToDictionary(pair => pair.Key.ToString(), pair => pair.Value)))
             .ToList();
 
         var buildings = game.Buildings
@@ -419,7 +503,10 @@ public sealed class GameStateService : IGameStateService
             game.WinnerId,
             game.LargestArmyHolderId,
             game.LongestRoadHolderId,
-            game.LongestRoadLength);
+            game.LongestRoadLength,
+            game.ActiveTradeOffer is { } offer ? ProjectOffer(offer) : null,
+            game.AllowSevens,
+            game.HasRolledDice);
     }
 
     private static DiceRolledDto ProjectRoll(RollOutcome outcome) =>
@@ -465,7 +552,8 @@ public sealed class GameStateService : IGameStateService
                 AnchorHexId: $"{node.AnchorHex.Q},{node.AnchorHex.R}",
                 AnchorCorner: node.AnchorCorner.ToString(),
                 node.OwnerId,
-                node.Building.ToString()))
+                node.Building.ToString(),
+                node.Harbor.ToString()))
             .ToList();
 
         var edges = board.Edges

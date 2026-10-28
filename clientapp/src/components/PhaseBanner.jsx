@@ -10,7 +10,7 @@ const ORDINAL = { SetupRound1: '1st', SetupRound2: '2nd' };
 /**
  * Prominent banner describing the current phase and what the active player must do.
  */
-export default function PhaseBanner({ game, currentPlayer, robberMover }) {
+export default function PhaseBanner({ game, currentPlayer, robberMover, isMyTurn = true }) {
   if (!game || !currentPlayer) return null;
 
   const isSetup = game.phase === 'SetupRound1' || game.phase === 'SetupRound2';
@@ -42,8 +42,8 @@ export default function PhaseBanner({ game, currentPlayer, robberMover }) {
     title = 'Game Over';
     instruction = 'the game has ended';
   } else {
-    title = 'Main Game';
-    instruction = game.lastRoll ? 'build, trade, or end your turn' : 'roll the dice';
+    title = game.allowSevens === false ? 'Main Game - No 7s' : 'Main Game';
+    instruction = game.hasRolledDice ? 'build, trade, or end your turn' : 'roll the dice (or play a card first)';
   }
 
   const highlight = isSetup || isRobber || game.phase === 'PlacingFreeRoads';
@@ -58,9 +58,9 @@ export default function PhaseBanner({ game, currentPlayer, robberMover }) {
       <p className="text-xs font-semibold uppercase tracking-wide opacity-80">{title}</p>
       <p className="mt-0.5 text-base font-medium">
         <span className={highlight ? 'font-bold' : `font-bold ${colorClass}`}>
-          {actor.name} ({actor.color})
+          {isMyTurn ? 'You' : `${actor.name} (${actor.color})`}
         </span>
-        , {instruction}.
+        {isMyTurn ? `, ${instruction}.` : `: waiting for them to ${instruction}.`}
       </p>
     </section>
   );

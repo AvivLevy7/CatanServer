@@ -98,7 +98,7 @@ export default function DiscardModal({ player, owed, onDiscard, disabled }) {
           </p>
           <button
             type="button"
-            onClick={() => onDiscard(player.id, picked)}
+            onClick={() => onDiscard(picked)}
             disabled={disabled || remaining !== 0}
             className="rounded-lg bg-amber-100 px-4 py-2 text-sm font-semibold text-stone-900 shadow transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
           >

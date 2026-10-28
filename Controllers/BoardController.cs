@@ -8,13 +8,15 @@ namespace CatanServer.Controllers;
 [Route("api/[controller]")]
 public sealed class BoardController : ControllerBase
 {
-    private readonly IGameStateService _gameState;
+    private readonly RoomManager _rooms;
 
-    public BoardController(IGameStateService gameState)
+    public BoardController(RoomManager rooms)
     {
-        _gameState = gameState;
+        _rooms = rooms;
     }
 
-    [HttpGet]
-    public ActionResult<BoardStateDto> Get() => Ok(_gameState.GetBoardState());
+    /// <summary>Board for a given room code, e.g. GET /api/board/ABCD.</summary>
+    [HttpGet("{roomId}")]
+    public ActionResult<BoardStateDto> Get(string roomId) =>
+        _rooms.TryGet(roomId, out var room) ? Ok(room.Game.GetBoardState()) : NotFound();
 }

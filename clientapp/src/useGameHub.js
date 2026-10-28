@@ -7,22 +7,36 @@ import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/s
 const HUB_URL = import.meta.env.VITE_HUB_URL ?? '/hubs/game';
 
 // Server-to-client methods defined by IGameClient on the C# side.
+const ROOM_STATE_EVENT = 'RoomState';
 const BOARD_STATE_EVENT = 'BoardState';
 const GAME_STATE_EVENT = 'GameState';
 const DICE_ROLLED_EVENT = 'DiceRolled';
 const ROBBER_MOVED_EVENT = 'RobberMoved';
 const GAME_OVER_EVENT = 'GameOver';
+const TRADE_OFFERED_EVENT = 'TradeOffered';
+const TRADE_RESOLVED_EVENT = 'TradeResolved';
 
 /**
  * Owns the SignalR connection and exposes the server-authoritative board and game state.
  * The hub pushes BoardState and GameState inside OnConnectedAsync, so no initial fetch is required.
  */
 export function useGameHub() {
+  const [room, setRoom] = useState(null);
+  // { roomId, playerId } for this browser; persisted so a refresh can rejoin.
+  const [session, setSession] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('catan.session')) ?? null;
+    } catch {
+      return null;
+    }
+  });
   const [board, setBoard] = useState(null);
   const [game, setGame] = useState(null);
   const [lastRoll, setLastRoll] = useState(null);
   const [lastRobbery, setLastRobbery] = useState(null);
   const [winner, setWinner] = useState(null);
+  // Most recent accept/decline/cancel so the proposer gets feedback.
+  const [lastTradeResult, setLastTradeResult] = useState(null);
   const [status, setStatus] = useState('connecting');
   const [error, setError] = useState(null);
   const [actionError, setActionError] = useState(null);
@@ -40,6 +54,12 @@ export function useGameHub() {
     // Guards against setting state after unmount, which React 19 StrictMode
     // would otherwise trigger via its double-invoked effects.
     let cancelled = false;
+
+    connection.on(ROOM_STATE_EVENT, (nextRoom) => {
+      if (!cancelled) {
+        setRoom(nextRoom);
+      }
+    });
 
     connection.on(BOARD_STATE_EVENT, (nextBoard) => {
       if (!cancelled) {
@@ -71,6 +91,18 @@ export function useGameHub() {
       }
     });
 
+    connection.on(TRADE_OFFERED_EVENT, () => {
+      if (!cancelled) {
+        setLastTradeResult(null);
+      }
+    });
+
+    connection.on(TRADE_RESOLVED_EVENT, (result) => {
+      if (!cancelled) {
+        setLastTradeResult(result);
+      }
+    });
+
     connection.onreconnecting(() => {
       if (!cancelled) setStatus('reconnecting');
     });
@@ -78,15 +110,11 @@ export function useGameHub() {
     connection.onreconnected(async () => {
       if (cancelled) return;
       setStatus('connected');
-      // Re-sync: the board may have changed while we were away.
+      // Re-sync: a new connection id means we must re-enter the room group.
       try {
-        const [latestBoard, latestGame] = await Promise.all([
-          connection.invoke('GetBoardState'),
-          connection.invoke('GetGameState'),
-        ]);
-        if (!cancelled) {
-          setBoard(latestBoard);
-          setGame(latestGame);
+        const saved = JSON.parse(sessionStorage.getItem('catan.session'));
+        if (saved?.roomId && saved?.playerId) {
+          await connection.invoke('RejoinRoom', saved.roomId, saved.playerId);
         }
       } catch {
         /* the next push will correct us */
@@ -99,8 +127,19 @@ export function useGameHub() {
 
     connection
       .start()
-      .then(() => {
-        if (!cancelled) setStatus('connected');
+      .then(async () => {
+        if (cancelled) return;
+        setStatus('connected');
+        // Resume a room from a previous page load, if any.
+        try {
+          const saved = JSON.parse(sessionStorage.getItem('catan.session'));
+          if (saved?.roomId && saved?.playerId) {
+            await connection.invoke('RejoinRoom', saved.roomId, saved.playerId);
+          }
+        } catch {
+          sessionStorage.removeItem('catan.session');
+          if (!cancelled) setSession(null);
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -111,11 +150,14 @@ export function useGameHub() {
 
     return () => {
       cancelled = true;
+      connection.off(ROOM_STATE_EVENT);
       connection.off(BOARD_STATE_EVENT);
       connection.off(GAME_STATE_EVENT);
       connection.off(DICE_ROLLED_EVENT);
       connection.off(ROBBER_MOVED_EVENT);
       connection.off(GAME_OVER_EVENT);
+      connection.off(TRADE_OFFERED_EVENT);
+      connection.off(TRADE_RESOLVED_EVENT);
       connection.stop();
       connectionRef.current = null;
     };
@@ -165,8 +207,16 @@ export function useGameHub() {
     (give, receive) => invokeMove('TradeWithBank', give, receive),
     [invokeMove],
   );
+  const proposeTrade = useCallback(
+    (targetPlayerId, offered, requested) =>
+      invokeMove('ProposeTrade', targetPlayerId ?? null, offered, requested),
+    [invokeMove],
+  );
+  const acceptTrade = useCallback((offerId) => invokeMove('AcceptTrade', offerId), [invokeMove]);
+  const rejectTrade = useCallback((offerId) => invokeMove('RejectTrade', offerId), [invokeMove]);
+  const cancelTrade = useCallback((offerId) => invokeMove('CancelTrade', offerId), [invokeMove]);
   const discardCards = useCallback(
-    (playerId, cards) => invokeMove('DiscardCards', playerId, cards),
+    (cards) => invokeMove('DiscardCards', cards),
     [invokeMove],
   );
   const moveRobber = useCallback(
@@ -202,16 +252,53 @@ export function useGameHub() {
     [invokeMove],
   );
   const placeInitialRoad = useCallback((edgeId) => invokeMove('PlaceInitialRoad', edgeId), [invokeMove]);
+
+  // Lobby. Create/Join return { roomId, playerId, room }; we remember our seat.
+  const enterRoom = useCallback(async (method, ...args) => {
+    const connection = connectionRef.current;
+    if (connection?.state !== HubConnectionState.Connected) return false;
+    setActionError(null);
+    try {
+      const joined = await connection.invoke(method, ...args);
+      const next = { roomId: joined.roomId, playerId: joined.playerId };
+      sessionStorage.setItem('catan.session', JSON.stringify(next));
+      setSession(next);
+      setRoom(joined.room);
+      return true;
+    } catch (err) {
+      setActionError(err?.message?.replace(/^.*HubException: /, '') ?? 'Could not join');
+      return false;
+    }
+  }, []);
+  const createRoom = useCallback((name) => enterRoom('CreateRoom', name), [enterRoom]);
+  const joinRoom = useCallback((roomId, name) => enterRoom('JoinRoom', roomId, name), [enterRoom]);
+  const leaveRoom = useCallback(() => {
+    sessionStorage.removeItem('catan.session');
+    setSession(null);
+    setRoom(null);
+    setBoard(null);
+    setGame(null);
+    setLastRoll(null);
+    setWinner(null);
+    // Simplest way to drop the SignalR group: reconnect.
+    window.location.reload();
+  }, []);
   const startGame = useCallback(
-    (playerCount) => {
+    (allowSevens = true) => {
       setLastRoll(null);
       setWinner(null);
-      return invokeMove('StartGame', playerCount);
+      return invokeMove('StartGame', session?.roomId, allowSevens);
     },
-    [invokeMove],
+    [invokeMove, session?.roomId],
   );
 
   return {
+    room,
+    session,
+    myPlayerId: session?.playerId ?? null,
+    createRoom,
+    joinRoom,
+    leaveRoom,
     board,
     game,
     lastRoll,
@@ -226,6 +313,12 @@ export function useGameHub() {
     buildRoad,
     buildCity,
     tradeWithBank,
+    proposeTrade,
+    acceptTrade,
+    rejectTrade,
+    cancelTrade,
+    lastTradeResult,
+    clearTradeResult: () => setLastTradeResult(null),
     discardCards,
     moveRobber,
     getStealCandidates,

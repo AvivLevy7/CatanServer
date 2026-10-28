@@ -13,13 +13,26 @@ public sealed record PlayerDto(
     int CitiesRemaining,
     IReadOnlyList<DevelopmentCardDto> DevelopmentCards,
     int KnightsPlayed,
-    int LongestRoadLength);
+    int LongestRoadLength,
+    IReadOnlyDictionary<string, int> BankRates);
 
 public sealed record BuildingDto(string NodeId, Guid OwnerId, string Type);
 
 public sealed record RoadDto(string EdgeId, Guid OwnerId);
 
 public sealed record DiceRollDto(int First, int Second, int Total);
+
+/// <summary>Pending player-to-player offer; TargetPlayerId is null for an open offer.</summary>
+public sealed record TradeOfferDto(
+    Guid OfferId,
+    Guid SenderPlayerId,
+    Guid? TargetPlayerId,
+    IReadOnlyDictionary<string, int> ResourcesOffered,
+    IReadOnlyDictionary<string, int> ResourcesRequested,
+    IReadOnlyList<Guid> DeclinedBy);
+
+/// <summary>Sent to the proposer when an offer is accepted, declined or dropped.</summary>
+public sealed record TradeResolvedDto(Guid OfferId, Guid? ByPlayerId, string Outcome);
 
 /// <summary>Full match snapshot: board plus players, buildings, roads and turn info.</summary>
 public sealed record GameStateDto(
@@ -42,7 +55,10 @@ public sealed record GameStateDto(
     Guid? WinnerId,
     Guid? LargestArmyHolderId,
     Guid? LongestRoadHolderId,
-    int LongestRoadLength);
+    int LongestRoadLength,
+    TradeOfferDto? ActiveTradeOffer,
+    bool AllowSevens,
+    bool HasRolledDice);
 
 /// <summary>Broadcast when the robber steals so clients can show who lost what.</summary>
 public sealed record RobberMovedDto(Guid MovedBy, string HexId, Guid? VictimId, string? StolenResource);

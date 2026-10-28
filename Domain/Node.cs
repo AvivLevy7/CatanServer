@@ -25,6 +25,9 @@ public sealed class Node
 
     public HarborType Harbor { get; internal set; } = HarborType.None;
 
+    /// <summary>Alias for <see cref="Harbor"/>; None when this intersection has no port.</summary>
+    public HarborType PortType => Harbor;
+
     public Guid? OwnerId { get; private set; }
 
     public BuildingType Building { get; private set; } = BuildingType.None;
