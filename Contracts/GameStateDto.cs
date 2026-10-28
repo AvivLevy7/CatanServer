@@ -31,11 +31,18 @@ public sealed record PlayerDto(
     int UnplayedDevCardCount,
     VictoryPointBreakdownDto VictoryPointBreakdown)
 {
-    /// <summary>Public view: same stats, but the hand itself is stripped (VP cards stay secret until the game ends).</summary>
+    /// <summary>
+    /// Public view: same stats, but the hand itself is stripped. Until the game ends the
+    /// victory-point cards are secret, so they are removed from both the breakdown and the
+    /// total - opponents only ever see the points visible on the board plus achievements.
+    /// </summary>
     public PlayerDto Redacted(bool revealVictoryPointCards = false) => this with
     {
         Resources = null,
         DevelopmentCards = null,
+        VictoryPoints = revealVictoryPointCards
+            ? VictoryPoints
+            : VictoryPoints - (VictoryPointBreakdown.VictoryPointCards ?? 0),
         VictoryPointBreakdown = revealVictoryPointCards
             ? VictoryPointBreakdown
             : VictoryPointBreakdown with { VictoryPointCards = null },

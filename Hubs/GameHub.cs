@@ -452,7 +452,7 @@ public sealed class GameHub : Hub<IGameClient>
 
         if (state.Phase == nameof(GamePhase.GameOver) && state.WinnerId is { } winnerId)
         {
-            var winner = state.Players.First(p => p.Id == winnerId).Redacted();
+            var winner = state.Players.First(p => p.Id == winnerId).Redacted(revealVictoryPointCards: true);
             await Clients.Group(room.Id).GameOver(winner);
         }
     }

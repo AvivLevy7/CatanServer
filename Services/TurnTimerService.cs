@@ -186,7 +186,7 @@ public sealed class TurnTimerService : IDisposable
 
             if (state.Phase == nameof(GamePhase.GameOver) && state.WinnerId is { } winnerId)
             {
-                await _hub.Clients.Group(roomId).GameOver(state.Players.First(p => p.Id == winnerId).Redacted());
+                await _hub.Clients.Group(roomId).GameOver(state.Players.First(p => p.Id == winnerId).Redacted(revealVictoryPointCards: true));
             }
         }
         catch (Exception ex)
