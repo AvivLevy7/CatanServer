@@ -1,6 +1,6 @@
 namespace CatanServer.Contracts;
 
-public sealed record LobbyPlayerDto(Guid Id, string Name, string Color, bool IsHost, bool IsConnected);
+public sealed record LobbyPlayerDto(Guid Id, string Name, string Color, bool IsHost, bool IsConnected, bool IsBot = false);
 
 /// <summary>Room snapshot pushed to everyone in the room whenever membership or status changes.</summary>
 public sealed record RoomStateDto(

@@ -13,7 +13,17 @@ public interface IGameClient
 
     Task BoardState(BoardStateDto board);
 
-    Task GameState(GameStateDto state);
+    /// <summary>Per-viewer snapshot: own hand in full, opponents as counts only.</summary>
+    Task GameState(ClientGameStateDto state);
+
+    /// <summary>The host started another round in the same room; clients should reset local UI state.</summary>
+    Task GameRestarted();
+
+    /// <summary>System chat line, e.g. "Red ran out of time".</summary>
+    Task SystemMessage(SystemMessageDto message);
+
+    /// <summary>Room chat.</summary>
+    Task ChatMessage(ChatMessageDto message);
 
     Task DiceRolled(DiceRolledDto roll);
 

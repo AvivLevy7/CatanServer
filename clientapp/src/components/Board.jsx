@@ -3,6 +3,7 @@ import HexTile from './HexTile';
 import NodeMarker from './NodeMarker';
 import EdgeMarker from './EdgeMarker';
 import PortMarker from './PortMarker';
+import TerrainDefs from './TerrainDefs';
 import { ROW_LENGTHS } from '../boardData';
 import { HEX_SIZE, HEX_WIDTH, VERTICAL_STEP, cornerPosition } from '../hexGeometry';
 
@@ -68,10 +69,13 @@ export default function Board({
   return (
     <svg
       viewBox={`${-PADDING} ${-PADDING} ${BOARD_WIDTH + PADDING * 2} ${BOARD_HEIGHT + PADDING * 2}`}
-      className="h-auto w-full max-w-2xl drop-shadow-xl"
+      className="h-full max-h-full w-full max-w-full object-contain drop-shadow-xl"
+      preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="Catan board"
     >
+      <TerrainDefs />
+
       <g aria-label="Tiles">
         {tiles.map((tile) => (
           <HexTile

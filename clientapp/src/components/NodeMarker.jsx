@@ -1,8 +1,9 @@
 const OWNER_FILL = {
-  Red: 'fill-red-500',
-  Blue: 'fill-blue-500',
-  Orange: 'fill-orange-500',
-  White: 'fill-stone-100',
+  Red: 'fill-seat-red',
+  Blue: 'fill-seat-blue',
+  Orange: 'fill-seat-orange',
+  White: 'fill-seat-white',
+  Green: 'fill-seat-green',
 };
 
 // Small house: square body with a pitched roof, centred on the origin.

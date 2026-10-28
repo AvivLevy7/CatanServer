@@ -13,12 +13,13 @@ public enum RoomStatus
 /// <summary>A seat in a room: a human identity that maps onto a <see cref="Player"/> once the game starts.</summary>
 public sealed class RoomMember
 {
-    public RoomMember(Guid id, string name, PlayerColor color, string connectionId)
+    public RoomMember(Guid id, string name, PlayerColor color, string? connectionId, bool isBot = false)
     {
         Id = id;
         Name = name;
         Color = color;
         ConnectionId = connectionId;
+        IsBot = isBot;
     }
 
     public Guid Id { get; }
@@ -27,8 +28,11 @@ public sealed class RoomMember
 
     public PlayerColor Color { get; }
 
-    /// <summary>Null while the player is disconnected (they may rejoin with the same id).</summary>
+    /// <summary>Null while the player is disconnected (they may rejoin with the same id). Always null for bots.</summary>
     public string? ConnectionId { get; internal set; }
+
+    /// <summary>Computer-controlled seat driven by <see cref="AiBotService"/>.</summary>
+    public bool IsBot { get; }
 }
 
 /// <summary>One lobby/game. Owns its own <see cref="GameStateService"/> so rooms never share state.</summary>
@@ -36,6 +40,7 @@ public sealed class Room
 {
     private readonly List<RoomMember> _members = [];
     private readonly Lock _gate = new();
+    private bool _allowSevens = true;
 
     public Room(string id)
     {
@@ -49,7 +54,21 @@ public sealed class Room
 
     public IGameStateService Game { get; }
 
-    public Guid HostPlayerId => _members.Count > 0 ? _members[0].Id : Guid.Empty;
+    /// <summary>The first human seat; bots can never host.</summary>
+    public Guid HostPlayerId => _members.FirstOrDefault(m => !m.IsBot)?.Id ?? Guid.Empty;
+
+    public bool HasBots
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _members.Any(m => m.IsBot);
+            }
+        }
+    }
+
+    public bool IsBot(Guid playerId) => FindById(playerId)?.IsBot ?? false;
 
     public IReadOnlyList<RoomMember> Members
     {
@@ -80,6 +99,59 @@ public sealed class Room
             var member = new RoomMember(Guid.NewGuid(), name, color, connectionId);
             _members.Add(member);
             return member;
+        }
+    }
+
+    /// <summary>Host fills an empty seat with a computer player ("Bot 1", "Bot 2", ...).</summary>
+    public RoomMember AddBot(Guid requesterId)
+    {
+        lock (_gate)
+        {
+            if (Status != RoomStatus.Lobby)
+            {
+                throw new GameRuleException("Bots can only be added in the lobby.");
+            }
+
+            if (requesterId != HostPlayerId)
+            {
+                throw new GameRuleException("Only the host can add bots.");
+            }
+
+            if (_members.Count >= GameStateService.MaxPlayers)
+            {
+                throw new GameRuleException("That room is full.");
+            }
+
+            var number = 1;
+            while (_members.Any(m => m.IsBot && m.Name == $"Bot {number}"))
+            {
+                number++;
+            }
+
+            var color = RoomManager.SeatColors.First(c => _members.All(m => m.Color != c));
+            var bot = new RoomMember(Guid.NewGuid(), $"Bot {number}", color, connectionId: null, isBot: true);
+            _members.Add(bot);
+            return bot;
+        }
+    }
+
+    public void RemoveBot(Guid requesterId, Guid botId)
+    {
+        lock (_gate)
+        {
+            if (Status != RoomStatus.Lobby)
+            {
+                throw new GameRuleException("Bots can only be removed in the lobby.");
+            }
+
+            if (requesterId != HostPlayerId)
+            {
+                throw new GameRuleException("Only the host can remove bots.");
+            }
+
+            var bot = _members.FirstOrDefault(m => m.Id == botId && m.IsBot)
+                ?? throw new GameRuleException("That bot is not in this room.");
+            _members.Remove(bot);
         }
     }
 
@@ -131,7 +203,7 @@ public sealed class Room
                 member.ConnectionId = null;
             }
 
-            return _members.Count == 0 || _members.All(m => m.ConnectionId is null);
+            return _members.All(m => m.IsBot || m.ConnectionId is null);
         }
     }
 
@@ -149,11 +221,49 @@ public sealed class Room
                 throw new GameRuleException("Only the host can start the game.");
             }
 
-            var seats = _members.Select(m => (m.Id, m.Name, m.Color)).ToList();
-            var state = Game.StartGame(seats, allowSevens);
+            _allowSevens = allowSevens;
+            var state = Game.StartGame(ShuffledSeats(), allowSevens);
             Status = RoomStatus.InGame;
             return state;
         }
+    }
+
+    /// <summary>
+    /// Host starts another round with the same seats: fresh shuffled board, empty
+    /// inventories, phase back to SetupRound1. Only allowed once the current game is over.
+    /// </summary>
+    public GameStateDto Restart(Guid requesterId)
+    {
+        lock (_gate)
+        {
+            if (Status != RoomStatus.InGame)
+            {
+                throw new GameRuleException("There is no game to restart.");
+            }
+
+            if (requesterId != HostPlayerId)
+            {
+                throw new GameRuleException("Only the host can start a new game.");
+            }
+
+            if (Game.GetGameState().Phase != nameof(GamePhase.GameOver))
+            {
+                throw new GameRuleException("Finish the current game before starting a new one.");
+            }
+
+            return Game.StartGame(ShuffledSeats(), _allowSevens);
+        }
+    }
+
+    /// <summary>
+    /// Turn order (and therefore initial placement order) is drawn at random rather than
+    /// following join order, so the host has no built-in advantage.
+    /// </summary>
+    private (Guid Id, string Name, PlayerColor Color)[] ShuffledSeats()
+    {
+        var seats = _members.Select(m => (m.Id, m.Name, m.Color)).ToArray();
+        Random.Shared.Shuffle(seats);
+        return seats;
     }
 
     public RoomStateDto ToDto()
@@ -164,7 +274,7 @@ public sealed class Room
                 Id,
                 Status.ToString(),
                 HostPlayerId,
-                _members.Select(m => new LobbyPlayerDto(m.Id, m.Name, m.Color.ToString(), m.Id == HostPlayerId, m.ConnectionId is not null)).ToList(),
+                _members.Select(m => new LobbyPlayerDto(m.Id, m.Name, m.Color.ToString(), m.Id == HostPlayerId, m.IsBot || m.ConnectionId is not null, m.IsBot)).ToList(),
                 GameStateService.MaxPlayers,
                 GameStateService.MinPlayers);
         }

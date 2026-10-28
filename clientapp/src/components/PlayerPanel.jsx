@@ -1,9 +1,9 @@
 // Server PlayerColor enum -> Tailwind classes.
 const PLAYER_COLORS = {
-  Red: { dot: 'bg-red-500', ring: 'ring-red-400' },
-  Blue: { dot: 'bg-blue-500', ring: 'ring-blue-400' },
-  Orange: { dot: 'bg-orange-500', ring: 'ring-orange-400' },
-  White: { dot: 'bg-stone-100', ring: 'ring-stone-200' },
+  Red: { dot: 'bg-seat-red', ring: 'ring-seat-red-glow' },
+  Blue: { dot: 'bg-seat-blue', ring: 'ring-seat-blue-glow' },
+  Orange: { dot: 'bg-seat-orange', ring: 'ring-seat-orange-glow' },
+  White: { dot: 'bg-seat-white', ring: 'ring-seat-white-glow' },
 };
 
 // Server ResourceType names -> display labels (classic Catan vocabulary).

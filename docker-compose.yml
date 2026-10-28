@@ -1,0 +1,19 @@
+# Local production rehearsal: `docker compose up --build`
+# Client: http://localhost:8081   API: http://localhost:8080
+services:
+  api:
+    build: .
+    environment:
+      ALLOWED_ORIGINS: http://localhost:8081
+    ports:
+      - "8080:8080"
+
+  client:
+    build:
+      context: ./clientapp
+      args:
+        VITE_API_URL: http://localhost:8080
+    ports:
+      - "8081:80"
+    depends_on:
+      - api

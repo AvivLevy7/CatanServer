@@ -142,6 +142,13 @@ public sealed class Game
 
     public DiceRoll? LastRoll { get; private set; }
 
+    // Keys 2..12, all present from the start so charts never have holes.
+    private readonly Dictionary<int, int> _diceRollFrequencies =
+        Enumerable.Range(2, 11).ToDictionary(total => total, _ => 0);
+
+    /// <summary>How often each total (2-12) has come up this game.</summary>
+    public IReadOnlyDictionary<int, int> DiceRollFrequencies => _diceRollFrequencies;
+
     public Player GetPlayer(Guid playerId) =>
         _players.FirstOrDefault(player => player.Id == playerId)
         ?? throw new KeyNotFoundException($"Player {playerId} is not in this game.");
@@ -506,9 +513,9 @@ public sealed class Game
         var give = Normalise(offered);
         var get = Normalise(requested);
 
-        if (give.Count == 0 && get.Count == 0)
+        if (give.Count == 0 || get.Count == 0)
         {
-            throw new GameRuleException("An offer must include at least one resource.");
+            throw new GameRuleException("A trade must offer at least one resource and request at least one resource.");
         }
 
         if (give.Keys.Intersect(get.Keys).Any())
@@ -804,6 +811,7 @@ public sealed class Game
         var roll = DiceRoll.Roll(_random, AllowSevens);
         LastRoll = roll;
         HasRolledDice = true;
+        _diceRollFrequencies[roll.Total]++;
 
         if (roll.ActivatesRobber)
         {
@@ -965,6 +973,146 @@ public sealed class Game
         RequireRolled();
         AdvanceTurn();
         return CurrentPlayer;
+    }
+
+    // ---------------------------------------------------------------- Timeouts
+
+    /// <summary>
+    /// Called by the host when the turn clock runs out. Performs the minimum legal
+    /// actions to unblock the game: a random setup placement, forced discards, a random
+    /// robber move, an auto-roll, or (if already rolled) withdrawing any offer and
+    /// ending the turn. Stops as soon as the turn passes or other players need to act.
+    /// </summary>
+    public TimeoutResolution ResolveTimeout()
+    {
+        var timedOut = CurrentTurnPlayerId;
+        var actions = new List<string>();
+        RollOutcome? roll = null;
+
+        for (var guard = 0; guard < 8; guard++)
+        {
+            switch (Phase)
+            {
+                case GamePhase.GameOver:
+                    return new TimeoutResolution(timedOut, actions, roll);
+
+                case GamePhase.SetupRound1:
+                case GamePhase.SetupRound2:
+                    if (SetupStep == SetupStep.PlaceSettlement)
+                    {
+                        AutoPlaceSetupSettlement();
+                        actions.Add("a settlement was placed automatically");
+                    }
+
+                    AutoPlaceSetupRoad();
+                    actions.Add("a road was placed automatically");
+                    return new TimeoutResolution(timedOut, actions, roll);
+
+                case GamePhase.WaitingForDiscards:
+                    AutoDiscardAll();
+                    actions.Add("outstanding discards were made automatically");
+                    continue;
+
+                case GamePhase.MovingRobber:
+                    AutoMoveRobber();
+                    actions.Add("the robber was moved automatically");
+                    continue;
+
+                case GamePhase.PlacingFreeRoads:
+                    _freeRoadsRemaining = 0;
+                    Phase = GamePhase.MainGame;
+                    actions.Add("unplaced free roads were forfeited");
+                    continue;
+
+                case GamePhase.MainGame:
+                    if (!HasRolledDice)
+                    {
+                        roll = RollDice(CurrentTurnPlayerId);
+                        actions.Add($"the dice were rolled automatically ({roll.Roll.Total})");
+                        if (Phase == GamePhase.WaitingForDiscards)
+                        {
+                            // Other players now owe cards; give them their own clock.
+                            return new TimeoutResolution(timedOut, actions, roll);
+                        }
+
+                        continue;
+                    }
+
+                    if (ActiveTradeOffer is not null)
+                    {
+                        ActiveTradeOffer = null;
+                        actions.Add("the pending trade offer was withdrawn");
+                    }
+
+                    AdvanceTurn();
+                    actions.Add("the turn was ended");
+                    return new TimeoutResolution(timedOut, actions, roll);
+            }
+        }
+
+        return new TimeoutResolution(timedOut, actions, roll);
+    }
+
+    private void AutoPlaceSetupSettlement()
+    {
+        var candidates = Board.Nodes
+            .Where(node => !node.IsOccupied
+                           && !node.Neighbors.Any(neighborId => Board.GetNode(neighborId).IsOccupied))
+            .ToArray();
+
+        if (candidates.Length == 0)
+        {
+            throw new GameRuleException("No legal settlement spot remains.");
+        }
+
+        PlaceInitialSettlement(CurrentTurnPlayerId, candidates[_random.Next(candidates.Length)].Id);
+    }
+
+    private void AutoPlaceSetupRoad()
+    {
+        var anchor = _pendingSetupSettlement
+            ?? throw new GameRuleException("No settlement is awaiting its road.");
+
+        var candidates = Board.GetNode(anchor).Edges
+            .Select(Board.GetEdge)
+            .Where(edge => !edge.HasRoad)
+            .ToArray();
+
+        if (candidates.Length == 0)
+        {
+            throw new GameRuleException("No legal road spot remains.");
+        }
+
+        PlaceInitialRoad(CurrentTurnPlayerId, candidates[_random.Next(candidates.Length)].Id);
+    }
+
+    private void AutoDiscardAll()
+    {
+        foreach (var (playerId, owed) in _pendingDiscards.ToArray())
+        {
+            var pool = GetPlayer(playerId).Resources
+                .SelectMany(pair => Enumerable.Repeat(pair.Key, pair.Value))
+                .OrderBy(_ => _random.Next())
+                .Take(owed);
+
+            var discard = pool
+                .GroupBy(resource => resource)
+                .ToDictionary(group => group.Key, group => group.Count());
+
+            DiscardCards(playerId, discard);
+        }
+    }
+
+    private void AutoMoveRobber()
+    {
+        var mover = _robberMover ?? throw new GameRuleException("Nobody is moving the robber.");
+
+        var hexes = Board.Hexes.Where(hex => !hex.HasRobber).ToArray();
+        var hex = hexes[_random.Next(hexes.Length)];
+        var candidates = StealCandidates(hex, mover).ToArray();
+        Guid? victim = candidates.Length > 0 ? candidates[_random.Next(candidates.Length)] : null;
+
+        MoveRobber(mover, hex.Coordinate, victim);
     }
 
     private void AdvanceTurn()
@@ -1283,3 +1431,6 @@ public sealed record ResourceGrant(Guid PlayerId, ResourceType Resource, int Amo
 
 /// <summary>Everything that happened as a result of one dice roll.</summary>
 public sealed record RollOutcome(Guid RolledBy, DiceRoll Roll, IReadOnlyList<ResourceGrant> Production);
+
+/// <summary>What the host did on behalf of <paramref name="TimedOutPlayerId"/> when the clock ran out.</summary>
+public sealed record TimeoutResolution(Guid TimedOutPlayerId, IReadOnlyList<string> Actions, RollOutcome? Roll);

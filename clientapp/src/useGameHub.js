@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr';
+import { sound } from './audio';
 
-// Relative path: the Vite dev proxy forwards /hubs (with ws: true) to the C# server,
-// so there is no hard-coded port here and no CORS preflight in development.
-// To bypass the proxy, set VITE_HUB_URL to e.g. https://localhost:7048/hubs/game
-const HUB_URL = import.meta.env.VITE_HUB_URL ?? '/hubs/game';
+// Base URL of the C# server, e.g. https://catan-api.onrender.com (no trailing slash).
+// Empty in development: the Vite dev proxy forwards /hubs (with ws: true) to the server,
+// so there is no hard-coded port and no CORS preflight locally.
+// Set in .env.production (or the hosting platform's build env) for deployments.
+const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '');
+const HUB_URL = `${API_URL}/hubs/game`;
 
 // Server-to-client methods defined by IGameClient on the C# side.
 const ROOM_STATE_EVENT = 'RoomState';
@@ -13,6 +16,7 @@ const GAME_STATE_EVENT = 'GameState';
 const DICE_ROLLED_EVENT = 'DiceRolled';
 const ROBBER_MOVED_EVENT = 'RobberMoved';
 const GAME_OVER_EVENT = 'GameOver';
+export const DICE_ANIMATION_MS = 1500;
 const TRADE_OFFERED_EVENT = 'TradeOffered';
 const TRADE_RESOLVED_EVENT = 'TradeResolved';
 
@@ -35,6 +39,14 @@ export function useGameHub() {
   const [lastRoll, setLastRoll] = useState(null);
   const [lastRobbery, setLastRobbery] = useState(null);
   const [winner, setWinner] = useState(null);
+  // Bumps every time the host restarts so screens can reset local UI (e.g. the log).
+  const [restartCount, setRestartCount] = useState(0);
+  // Latest server announcement (timeouts etc.); App appends it to the log.
+  const [systemMessage, setSystemMessage] = useState(null);
+  // Room chat history for this page load.
+  const [chatMessages, setChatMessages] = useState([]);
+  const [isRolling, setIsRolling] = useState(false);
+  const rollRevealRef = useRef(null);
   // Most recent accept/decline/cancel so the proposer gets feedback.
   const [lastTradeResult, setLastTradeResult] = useState(null);
   const [status, setStatus] = useState('connecting');
@@ -74,9 +86,16 @@ export function useGameHub() {
     });
 
     connection.on(DICE_ROLLED_EVENT, (roll) => {
-      if (!cancelled) {
+      if (cancelled) return;
+      // Tumble for a moment before revealing; App locks the controls while isRolling.
+      clearTimeout(rollRevealRef.current);
+      sound.play('dice');
+      setIsRolling(true);
+      rollRevealRef.current = setTimeout(() => {
+        if (cancelled) return;
         setLastRoll(roll);
-      }
+        setIsRolling(false);
+      }, DICE_ANIMATION_MS);
     });
 
     connection.on(ROBBER_MOVED_EVENT, (robbery) => {
@@ -88,6 +107,28 @@ export function useGameHub() {
     connection.on(GAME_OVER_EVENT, (winningPlayer) => {
       if (!cancelled) {
         setWinner(winningPlayer);
+      }
+    });
+
+    connection.on('SystemMessage', (message) => {
+      if (!cancelled) {
+        setSystemMessage(message);
+      }
+    });
+
+    connection.on('ChatMessage', (message) => {
+      if (!cancelled) {
+        setChatMessages((prev) => [...prev.slice(-199), message]);
+      }
+    });
+
+    connection.on('GameRestarted', () => {
+      if (!cancelled) {
+        setWinner(null);
+        setLastRoll(null);
+        setLastRobbery(null);
+        setLastTradeResult(null);
+        setRestartCount((n) => n + 1);
       }
     });
 
@@ -150,6 +191,7 @@ export function useGameHub() {
 
     return () => {
       cancelled = true;
+      clearTimeout(rollRevealRef.current);
       connection.off(ROOM_STATE_EVENT);
       connection.off(BOARD_STATE_EVENT);
       connection.off(GAME_STATE_EVENT);
@@ -158,6 +200,8 @@ export function useGameHub() {
       connection.off(GAME_OVER_EVENT);
       connection.off(TRADE_OFFERED_EVENT);
       connection.off(TRADE_RESOLVED_EVENT);
+      connection.off('ChatMessage');
+      connection.off('SystemMessage');
       connection.stop();
       connectionRef.current = null;
     };
@@ -291,6 +335,16 @@ export function useGameHub() {
     },
     [invokeMove, session?.roomId],
   );
+  const restartGame = useCallback(
+    () => invokeMove('RestartGame', session?.roomId),
+    [invokeMove, session?.roomId],
+  );
+  const addBot = useCallback(() => invokeMove('AddBot', session?.roomId), [invokeMove, session?.roomId]);
+  const removeBot = useCallback(
+    (botId) => invokeMove('RemoveBot', session?.roomId, botId),
+    [invokeMove, session?.roomId],
+  );
+  const sendChat = useCallback((text) => invokeMove('SendChat', text), [invokeMove]);
 
   return {
     room,
@@ -299,6 +353,10 @@ export function useGameHub() {
     createRoom,
     joinRoom,
     leaveRoom,
+    addBot,
+    removeBot,
+    chatMessages,
+    sendChat,
     board,
     game,
     lastRoll,
@@ -328,6 +386,10 @@ export function useGameHub() {
     playYearOfPlenty,
     playRoadBuilding,
     winner,
+    restartGame,
+    restartCount,
+    systemMessage,
+    isRolling,
     lastRobbery,
     placeInitialSettlement,
     placeInitialRoad,

@@ -1,0 +1,14 @@
+# Build context hygiene for the backend image
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+
+# Frontend has its own Dockerfile
+clientapp/
+.git/
+.gitignore
+.gitattributes
+*.md

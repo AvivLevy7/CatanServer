@@ -7,6 +7,12 @@ public static class BoardFactory
 {
     private const int Radius = 2;
 
+    /// <summary>
+    /// Empty coastal edges required between two harbours. Two keeps ports apart and also
+    /// guarantees no non-port edge ever joins two intersections of the same harbour type.
+    /// </summary>
+    private const int MinHarborGap = 2;
+
     private static readonly HexType[] TerrainPool =
     [
         HexType.Desert,
@@ -22,22 +28,12 @@ public static class BoardFactory
         2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12
     ];
 
-    /// <summary>
-    /// Standard harbour ring: nine coastal edges, each identified by an outer hex and the
-    /// side of that hex facing the sea (named by the two corners it joins). Walks clockwise
-    /// from the top of the board; four 3:1 and five 2:1 like the printed frame pieces.
-    /// </summary>
-    private static readonly (AxialCoordinate Hex, HexCorner A, HexCorner B, HarborType Type)[] HarborLayout =
+
+    /// <summary>Four 3:1 harbours plus one 2:1 harbour per resource.</summary>
+    private static readonly HarborType[] HarborPool =
     [
-        (new(0, -2), HexCorner.NorthWest, HexCorner.North, HarborType.Generic),
-        (new(1, -2), HexCorner.North, HexCorner.NorthEast, HarborType.Wool),
-        (new(2, -1), HexCorner.NorthEast, HexCorner.SouthEast, HarborType.Generic),
-        (new(2, 0), HexCorner.NorthEast, HexCorner.SouthEast, HarborType.Grain),
-        (new(1, 1), HexCorner.SouthEast, HexCorner.South, HarborType.Brick),
-        (new(0, 2), HexCorner.SouthEast, HexCorner.South, HarborType.Generic),
-        (new(-1, 2), HexCorner.South, HexCorner.SouthWest, HarborType.Lumber),
-        (new(-2, 1), HexCorner.SouthWest, HexCorner.NorthWest, HarborType.Ore),
-        (new(-1, -1), HexCorner.NorthWest, HexCorner.North, HarborType.Generic),
+        HarborType.Generic, HarborType.Generic, HarborType.Generic, HarborType.Generic,
+        HarborType.Brick, HarborType.Lumber, HarborType.Ore, HarborType.Grain, HarborType.Wool,
     ];
 
     public static BoardGraph CreateStandardBoard(Random? random = null)
@@ -63,23 +59,81 @@ public static class BoardFactory
         }
 
         var board = new BoardGraph(hexes);
-        PlaceHarbors(board);
+        PlaceHarbors(board, random);
         return board;
     }
 
-    /// <summary>Marks both intersections of each harbour edge.</summary>
-    private static void PlaceHarbors(BoardGraph board)
+    /// <summary>
+    /// Places the nine harbours on random coastal edges such that no two harbours touch:
+    /// there is always at least one harbour-free coastal edge between neighbouring ports.
+    /// The harbour types are shuffled independently of the positions.
+    /// </summary>
+    private static void PlaceHarbors(BoardGraph board, Random random)
     {
-        foreach (var (hex, a, b, type) in HarborLayout)
+        var coast = CoastalRing(board);
+        var types = Shuffle(HarborPool, random);
+
+        if (coast.Count < types.Length * (MinHarborGap + 1))
         {
-            foreach (var corner in new[] { a, b })
-            {
-                if (board.TryGetNode(NodeId.FromCorner(hex, corner), out var node))
-                {
-                    node.Harbor = type;
-                }
-            }
+            throw new InvalidOperationException("Not enough coastline to space the harbours apart.");
         }
+
+        // Every port owns one edge plus at least MinHarborGap empty edges after it; the
+        // surplus empty edges are sprinkled randomly across the gaps, then the whole
+        // pattern is rotated.
+        var gaps = new int[types.Length];
+        Array.Fill(gaps, MinHarborGap);
+        for (var spare = coast.Count - types.Length * (MinHarborGap + 1); spare > 0; spare--)
+        {
+            gaps[random.Next(gaps.Length)]++;
+        }
+
+        var position = random.Next(coast.Count);
+        for (var i = 0; i < types.Length; i++)
+        {
+            var edge = coast[position % coast.Count];
+            board.GetNode(edge.First).Harbor = types[i];
+            board.GetNode(edge.Second).Harbor = types[i];
+            position += 1 + gaps[i];
+        }
+    }
+
+    /// <summary>
+    /// The coastal edges in walking order around the island. An edge is coastal when its
+    /// two intersections share exactly one on-board hex (the other side is sea).
+    /// </summary>
+    private static List<Edge> CoastalRing(BoardGraph board)
+    {
+        var coastal = board.Edges
+            .Where(edge => board.GetNode(edge.First).Hexes.Intersect(board.GetNode(edge.Second).Hexes).Count() == 1)
+            .ToDictionary(edge => edge.Id);
+
+        var ring = new List<Edge>(coastal.Count);
+        var total = coastal.Count;
+        var current = coastal.Values.First();
+        var previousNode = current.First;
+
+        while (ring.Count < total)
+        {
+            ring.Add(current);
+            coastal.Remove(current.Id);
+
+            var pivot = current.Other(previousNode);
+            var next = board.GetNode(pivot).Edges
+                .Where(coastal.ContainsKey)
+                .Select(id => coastal[id])
+                .FirstOrDefault();
+
+            if (next is null)
+            {
+                break;
+            }
+
+            previousNode = pivot;
+            current = next;
+        }
+
+        return ring;
     }
 
     private static IEnumerable<AxialCoordinate> EnumerateCoordinates()

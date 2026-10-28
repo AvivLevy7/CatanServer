@@ -4,14 +4,10 @@ export { HEX_SIZE, HEX_WIDTH, VERTICAL_STEP } from '../hexGeometry';
 
 const POINTS = HEX_POINTS;
 
-const TERRAIN_FILL = {
-  Forest: 'fill-catan-forest',
-  Pasture: 'fill-catan-pasture',
-  Fields: 'fill-catan-fields',
-  Hills: 'fill-catan-hills',
-  Mountains: 'fill-catan-mountains',
-  Desert: 'fill-catan-desert',
-};
+const TERRAIN_TYPES = new Set(['Forest', 'Pasture', 'Fields', 'Hills', 'Mountains', 'Desert']);
+
+// Pips below the number mirror the physical tokens (probability out of 36).
+const PIPS = { 2: 1, 12: 1, 3: 2, 11: 2, 4: 3, 10: 3, 5: 4, 9: 4, 6: 5, 8: 5 };
 
 export default function HexTile({ tile, isSelected, onSelect, robberMode = false }) {
   const { type, numberToken, hasRobber } = tile;
@@ -44,35 +40,63 @@ export default function HexTile({ tile, isSelected, onSelect, robberMode = false
       }}
     >
       {/* transform-box:fill-box makes origin-center resolve against the shape, not the SVG root. */}
-      <polygon
-        points={POINTS}
-        className={`${TERRAIN_FILL[type] ?? 'fill-slate-400'} [transform-box:fill-box] origin-center stroke-amber-950/70 stroke-2 transition-all duration-200 ease-out group-hover:scale-105 group-hover:brightness-115 group-focus-visible:brightness-115 ${
-          isSelected ? 'stroke-[5] stroke-white brightness-110' : ''
-        } ${isRobberTarget ? 'group-hover:stroke-[5] group-hover:stroke-stone-900' : ''}`}
-      />
+      <g
+        className={`[transform-box:fill-box] origin-center transition-all duration-200 ease-out group-hover:scale-105 group-hover:brightness-115 group-focus-visible:brightness-115 ${
+          isSelected ? 'brightness-110' : ''
+        }`}
+      >
+        <polygon
+          points={POINTS}
+          fill={TERRAIN_TYPES.has(type) ? `url(#terrain-${type})` : '#94a3b8'}
+          className="stroke-amber-950/80 stroke-2"
+        />
+        <polygon points={POINTS} fill="url(#terrain-vignette)" className="pointer-events-none" />
+        <polygon
+          points={POINTS}
+          fill="none"
+          className={`pointer-events-none transition-all duration-200 ${
+            isSelected
+              ? 'stroke-[5] stroke-amber-100 drop-shadow-[0_0_6px_rgba(253,230,138,0.9)]'
+              : 'stroke-amber-200/25 stroke-1'
+          } ${isRobberTarget ? 'group-hover:stroke-[5] group-hover:stroke-rose-200' : ''}`}
+        />
+      </g>
 
       {numberToken != null && (
-        <g className="pointer-events-none">
-          <circle
-            r={HEX_SIZE * 0.29}
-            className="fill-amber-50 stroke-amber-950/40 stroke-1 drop-shadow"
-          />
+        <g className="pointer-events-none" filter="url(#soft-shadow)">
+          <circle r={HEX_SIZE * 0.3} fill="url(#token-face)" className="stroke-amber-900/70 stroke-[1.5]" />
+          <circle r={HEX_SIZE * 0.25} fill="none" className="stroke-amber-800/30 stroke-1" />
           <text
+            y={-2}
             textAnchor="middle"
             dominantBaseline="central"
-            className={`select-none text-[1.7rem] font-bold ${
+            className={`select-none font-display text-[1.55rem] font-bold ${
               isHighProbability ? 'fill-red-700' : 'fill-stone-800'
             }`}
           >
             {numberToken}
           </text>
+          <g transform={`translate(0 ${HEX_SIZE * 0.17})`}>
+            {Array.from({ length: PIPS[numberToken] ?? 0 }).map((_, i, arr) => (
+              <circle
+                key={i}
+                cx={(i - (arr.length - 1) / 2) * 4}
+                r="1.3"
+                className={isHighProbability ? 'fill-red-700' : 'fill-stone-700'}
+              />
+            ))}
+          </g>
         </g>
       )}
 
       {hasRobber && (
-        <g className="pointer-events-none" transform={`translate(0, ${HEX_SIZE * 0.52})`}>
-          <circle r={HEX_SIZE * 0.2} className="fill-stone-900/90 stroke-stone-100/80 stroke-2 drop-shadow" />
-          <circle cy={-HEX_SIZE * 0.06} r={HEX_SIZE * 0.08} className="fill-stone-600" />
+        <g className="pointer-events-none" transform={`translate(0, ${HEX_SIZE * 0.5})`} filter="url(#soft-shadow)">
+          <ellipse cy={HEX_SIZE * 0.13} rx={HEX_SIZE * 0.2} ry={HEX_SIZE * 0.06} className="fill-black/40" />
+          <path
+            d={`M ${-HEX_SIZE * 0.17} ${HEX_SIZE * 0.12} Q ${-HEX_SIZE * 0.19} ${-HEX_SIZE * 0.08} 0 ${-HEX_SIZE * 0.1} Q ${HEX_SIZE * 0.19} ${-HEX_SIZE * 0.08} ${HEX_SIZE * 0.17} ${HEX_SIZE * 0.12} Z`}
+            className="fill-stone-900 stroke-stone-300/70 stroke-1"
+          />
+          <circle cy={-HEX_SIZE * 0.16} r={HEX_SIZE * 0.09} className="fill-stone-900 stroke-stone-300/70 stroke-1" />
         </g>
       )}
     </g>

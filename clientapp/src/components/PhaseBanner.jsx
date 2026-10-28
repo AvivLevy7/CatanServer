@@ -1,9 +1,4 @@
-const PLAYER_TEXT = {
-  Red: 'text-red-300',
-  Blue: 'text-blue-300',
-  Orange: 'text-orange-300',
-  White: 'text-stone-100',
-};
+import { seat } from '../theme';
 
 const ORDINAL = { SetupRound1: '1st', SetupRound2: '2nd' };
 
@@ -16,7 +11,7 @@ export default function PhaseBanner({ game, currentPlayer, robberMover, isMyTurn
   const isSetup = game.phase === 'SetupRound1' || game.phase === 'SetupRound2';
   const isRobber = game.phase === 'WaitingForDiscards' || game.phase === 'MovingRobber';
   const actor = isRobber && robberMover ? robberMover : currentPlayer;
-  const colorClass = PLAYER_TEXT[actor.color] ?? 'text-amber-50';
+  const colorClass = seat(actor.color).text;
 
   let title;
   let instruction;
@@ -51,14 +46,16 @@ export default function PhaseBanner({ game, currentPlayer, robberMover, isMyTurn
   return (
     <section
       aria-live="polite"
-      className={`rounded-xl px-4 py-3 text-center shadow ${
-        highlight ? 'bg-amber-200/90 text-stone-900' : 'bg-sky-800/70 text-amber-50'
+      className={`rounded-2xl border px-4 py-3 text-center shadow-2xl backdrop-blur-md ${
+        highlight
+          ? 'animate-glow border-amber-300/70 bg-gradient-to-b from-amber-200/95 to-amber-400/95 text-ink-900'
+          : 'border-amber-700/50 bg-gray-900/80 text-parchment-100'
       }`}
     >
-      <p className="text-xs font-semibold uppercase tracking-wide opacity-80">{title}</p>
-      <p className="mt-0.5 text-base font-medium">
-        <span className={highlight ? 'font-bold' : `font-bold ${colorClass}`}>
-          {isMyTurn ? 'You' : `${actor.name} (${actor.color})`}
+      <p className="font-display text-[10px] font-bold uppercase tracking-[0.3em] opacity-80">{title}</p>
+      <p className="mt-0.5 text-base">
+        <span className={`font-display font-bold ${highlight ? '' : colorClass}`}>
+          {isMyTurn ? 'You' : `${actor.name} (${seat(actor.color).label})`}
         </span>
         {isMyTurn ? `, ${instruction}.` : `: waiting for them to ${instruction}.`}
       </p>

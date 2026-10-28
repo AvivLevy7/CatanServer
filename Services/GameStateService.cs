@@ -48,7 +48,8 @@ public interface IGameStateService
 
     GameStateDto PlayKnightCard(Guid actorId, Guid cardId);
 
-    GameStateDto PlayMonopoly(Guid actorId, Guid cardId, string resource);
+    /// <summary>Returns how many cards were collected so the hub can announce it.</summary>
+    (int Collected, GameStateDto State) PlayMonopoly(Guid actorId, Guid cardId, string resource);
 
     GameStateDto PlayYearOfPlenty(Guid actorId, Guid cardId, string first, string second);
 
@@ -63,6 +64,17 @@ public interface IGameStateService
 
     /// <summary>Starts a fresh game for the given named seats (lobby flow).</summary>
     GameStateDto StartGame(IReadOnlyList<(Guid Id, string Name, PlayerColor Color)> seats, bool allowSevens = true);
+
+    /// <summary>Forces progress when the turn clock expires. Null if nothing needed doing.</summary>
+    (TimeoutResolution Resolution, DiceRolledDto? Roll, GameStateDto State)? ResolveTimeout();
+
+    /// <summary>Server-side turn clock; the hub decides when to arm/reset it.</summary>
+    DateTimeOffset? TurnDeadline { get; }
+
+    void SetTurnDeadline(DateTimeOffset? deadline);
+
+    /// <summary>Opaque marker that changes whenever the actor-to-wait-for changes.</summary>
+    (GamePhase Phase, Guid Actor, bool Rolled, int Turn) TurnKey { get; }
 }
 
 /// <summary>
@@ -161,6 +173,49 @@ public sealed class GameStateService : IGameStateService
         lock (_gate)
         {
             return ProjectGame(_game);
+        }
+    }
+
+    private DateTimeOffset? _turnDeadline;
+
+    public DateTimeOffset? TurnDeadline
+    {
+        get { lock (_gate) { return _turnDeadline; } }
+    }
+
+    public void SetTurnDeadline(DateTimeOffset? deadline)
+    {
+        lock (_gate)
+        {
+            _turnDeadline = deadline;
+        }
+    }
+
+    public (GamePhase Phase, Guid Actor, bool Rolled, int Turn) TurnKey
+    {
+        get
+        {
+            lock (_gate)
+            {
+                // During discards/robber the clock belongs to whoever must act, not the roller.
+                var actor = _game.Phase == GamePhase.MovingRobber ? _game.RobberMover ?? _game.CurrentTurnPlayerId : _game.CurrentTurnPlayerId;
+                return (_game.Phase, actor, _game.HasRolledDice, _game.TurnNumber);
+            }
+        }
+    }
+
+    public (TimeoutResolution Resolution, DiceRolledDto? Roll, GameStateDto State)? ResolveTimeout()
+    {
+        lock (_gate)
+        {
+            if (_game.Phase == GamePhase.GameOver)
+            {
+                return null;
+            }
+
+            var resolution = _game.ResolveTimeout();
+            _game.CheckForWinner();
+            return (resolution, resolution.Roll is { } roll ? ProjectRoll(roll) : null, ProjectGame(_game));
         }
     }
 
@@ -370,13 +425,13 @@ public sealed class GameStateService : IGameStateService
         }
     }
 
-    public GameStateDto PlayMonopoly(Guid actorId, Guid cardId, string resource)
+    public (int Collected, GameStateDto State) PlayMonopoly(Guid actorId, Guid cardId, string resource)
     {
         var parsed = ParseResource(resource);
         lock (_gate)
         {
-            _game.PlayMonopoly(actorId, cardId, parsed);
-            return ProjectGame(_game);
+            var collected = _game.PlayMonopoly(actorId, cardId, parsed);
+            return (collected, ProjectGame(_game));
         }
     }
 
@@ -448,7 +503,7 @@ public sealed class GameStateService : IGameStateService
         return new Game(snapshot.Id, snapshot.Board, players, allowSevens: allowSevens);
     }
 
-    private static GameStateDto ProjectGame(Game game)
+    private GameStateDto ProjectGame(Game game)
     {
         var players = game.Players
             .Select(player => new PlayerDto(
@@ -472,7 +527,15 @@ public sealed class GameStateService : IGameStateService
                     .ToList(),
                 player.KnightsPlayed,
                 game.RoadLengths.GetValueOrDefault(player.Id),
-                game.BankRates(player.Id).ToDictionary(pair => pair.Key.ToString(), pair => pair.Value)))
+                game.BankRates(player.Id).ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
+                ResourceCardCount: player.Resources.Values.Sum(),
+                UnplayedDevCardCount: player.DevelopmentCards.Count(card => !card.IsPlayed),
+                VictoryPointBreakdown: new VictoryPointBreakdownDto(
+                    Settlements: game.SettlementsBuilt(player.Id),
+                    Cities: game.CitiesBuilt(player.Id) * 2,
+                    LongestRoad: game.LongestRoadHolderId == player.Id ? Achievements.BonusVictoryPoints : 0,
+                    LargestArmy: game.LargestArmyHolderId == player.Id ? Achievements.BonusVictoryPoints : 0,
+                    VictoryPointCards: player.DevelopmentCards.Count(card => card.Type == DevelopmentCardType.VictoryPoint))))
             .ToList();
 
         var buildings = game.Buildings
@@ -506,7 +569,9 @@ public sealed class GameStateService : IGameStateService
             game.LongestRoadLength,
             game.ActiveTradeOffer is { } offer ? ProjectOffer(offer) : null,
             game.AllowSevens,
-            game.HasRolledDice);
+            game.HasRolledDice,
+            _turnDeadline,
+            new Dictionary<int, int>(game.DiceRollFrequencies));
     }
 
     private static DiceRolledDto ProjectRoll(RollOutcome outcome) =>

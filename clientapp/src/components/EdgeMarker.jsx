@@ -1,8 +1,9 @@
 const OWNER_STROKE = {
-  Red: 'stroke-red-500',
-  Blue: 'stroke-blue-500',
-  Orange: 'stroke-orange-500',
-  White: 'stroke-stone-100',
+  Red: 'stroke-seat-red',
+  Blue: 'stroke-seat-blue',
+  Orange: 'stroke-seat-orange',
+  White: 'stroke-seat-white',
+  Green: 'stroke-seat-green',
 };
 
 /**

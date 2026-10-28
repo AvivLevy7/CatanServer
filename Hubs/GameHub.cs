@@ -15,11 +15,15 @@ public sealed class GameHub : Hub<IGameClient>
     public const string Route = "/hubs/game";
 
     private readonly RoomManager _rooms;
+    private readonly TurnTimerService _timers;
+    private readonly AiBotService _bots;
     private readonly ILogger<GameHub> _logger;
 
-    public GameHub(RoomManager rooms, ILogger<GameHub> logger)
+    public GameHub(RoomManager rooms, TurnTimerService timers, AiBotService bots, ILogger<GameHub> logger)
     {
         _rooms = rooms;
+        _timers = timers;
+        _bots = bots;
         _logger = logger;
     }
 
@@ -33,10 +37,15 @@ public sealed class GameHub : Hub<IGameClient>
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);
 
+        var playerId = _rooms.PlayerFor(Context.ConnectionId);
         var room = _rooms.Disconnect(Context.ConnectionId);
         if (room is not null)
         {
             await Clients.Group(room.Id).RoomState(room.ToDto());
+            if (room.Status == RoomStatus.InGame && playerId is { } pid)
+            {
+                _timers.OnPlayerDisconnected(room, pid);
+            }
         }
 
         await base.OnDisconnectedAsync(exception);
@@ -92,7 +101,49 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         await Enter(room, playerId);
+        if (room.Status == RoomStatus.InGame)
+        {
+            _timers.OnPlayerReconnected(room, playerId);
+        }
+
         return new JoinedRoomDto(room.Id, playerId, room.ToDto());
+    }
+
+    /// <summary>Host fills an empty seat with a computer player.</summary>
+    public async Task AddBot(string roomId)
+    {
+        var room = RequireRoom(roomId);
+        var me = CurrentPlayerId();
+
+        RoomMember bot;
+        try
+        {
+            bot = room.AddBot(me);
+        }
+        catch (GameRuleException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+
+        _logger.LogInformation("{Bot} added to room {RoomId}", bot.Name, room.Id);
+        await Clients.Group(room.Id).RoomState(room.ToDto());
+    }
+
+    public async Task RemoveBot(string roomId, Guid botId)
+    {
+        var room = RequireRoom(roomId);
+        var me = CurrentPlayerId();
+
+        try
+        {
+            room.RemoveBot(me, botId);
+        }
+        catch (GameRuleException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+
+        await Clients.Group(room.Id).RoomState(room.ToDto());
     }
 
     /// <summary>Host starts the game: room moves from Lobby to SetupRound1.</summary>
@@ -114,7 +165,33 @@ public sealed class GameHub : Hub<IGameClient>
         _logger.LogInformation("Room {RoomId} started with {Count} players", room.Id, state.Players.Count);
         await Clients.Group(room.Id).RoomState(room.ToDto());
         await Clients.Group(room.Id).BoardState(state.Board);
-        await Clients.Group(room.Id).GameState(state);
+        await BroadcastGameState(room, state);
+        _timers.Reset(room);
+        _bots.Sync(room);
+    }
+
+    /// <summary>Host starts another round in the same room after a Game Over.</summary>
+    public async Task RestartGame(string roomId)
+    {
+        var room = RequireRoom(roomId);
+        var me = CurrentPlayerId();
+
+        GameStateDto state;
+        try
+        {
+            state = room.Restart(me);
+        }
+        catch (GameRuleException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+
+        _logger.LogInformation("Room {RoomId} restarted by host {Player}", room.Id, me);
+        await Clients.Group(room.Id).GameRestarted();
+        await Clients.Group(room.Id).BoardState(state.Board);
+        await BroadcastGameState(room, state);
+        _timers.Reset(room);
+        _bots.Sync(room);
     }
 
     private async Task Enter(Room room, Guid playerId)
@@ -126,15 +203,39 @@ public sealed class GameHub : Hub<IGameClient>
         if (room.Status == RoomStatus.InGame)
         {
             await Clients.Caller.BoardState(room.Game.GetBoardState());
-            await Clients.Caller.GameState(room.Game.GetGameState());
+            await Clients.Caller.GameState(new ClientGameStateDto(room.Game.GetGameState(), playerId));
         }
+    }
+
+    // ---------------------------------------------------------------- Chat
+
+    /// <summary>Relays a chat line to everyone in the caller's room (lobby or in game).</summary>
+    public async Task SendChat(string text)
+    {
+        var room = CurrentRoom();
+        var me = CurrentPlayerId();
+        var trimmed = text?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0)
+        {
+            return;
+        }
+
+        if (trimmed.Length > 280)
+        {
+            trimmed = trimmed[..280];
+        }
+
+        var name = room.FindById(me)?.Name ?? "Someone";
+        await Clients.Group(room.Id).ChatMessage(new ChatMessageDto(Guid.NewGuid(), me, name, trimmed, DateTimeOffset.UtcNow));
     }
 
     // ---------------------------------------------------------------- Queries
 
     public BoardStateDto GetBoardState() => CurrentGame().GetBoardState();
 
-    public GameStateDto GetGameState() => CurrentGame().GetGameState();
+    /// <summary>Redacted for the caller: never hands out opponents' hands.</summary>
+    public ClientGameStateDto GetGameState() =>
+        new(CurrentGame().GetGameState(), CurrentPlayerId());
 
     public IReadOnlyList<Guid> GetStealCandidates(string hexId)
     {
@@ -165,7 +266,7 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         await Clients.Group(room.Id).DiceRolled(result.Roll);
-        await Clients.Group(room.Id).GameState(result.State);
+        await BroadcastGameState(room, result.State);
     }
 
     public Task EndTurn() => ApplyMove("EndTurn", "-", (g, me) => g.EndTurn(me));
@@ -199,7 +300,7 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         await Clients.Group(room.Id).TradeOffered(result.Offer);
-        await Clients.Group(room.Id).GameState(result.State);
+        await BroadcastGameState(room, result.State);
     }
 
     /// <summary>The caller accepts the offer. Identity comes from the connection, never the client.</summary>
@@ -219,7 +320,7 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         await Clients.Group(room.Id).TradeResolved(new TradeResolvedDto(id, me, "Accepted"));
-        await Clients.Group(room.Id).GameState(state);
+        await BroadcastGameState(room, state);
     }
 
     public async Task RejectTrade(string offerId)
@@ -238,7 +339,7 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         await Clients.Group(room.Id).TradeResolved(new TradeResolvedDto(id, me, result.Removed ? "Rejected" : "Declined"));
-        await Clients.Group(room.Id).GameState(result.State);
+        await BroadcastGameState(room, result.State);
     }
 
     public async Task CancelTrade(string offerId)
@@ -257,7 +358,7 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         await Clients.Group(room.Id).TradeResolved(new TradeResolvedDto(id, null, "Cancelled"));
-        await Clients.Group(room.Id).GameState(state);
+        await BroadcastGameState(room, state);
     }
 
     /// <summary>The caller discards their own cards after a 7.</summary>
@@ -270,8 +371,25 @@ public sealed class GameHub : Hub<IGameClient>
     public Task PlayKnightCard(Guid cardId) =>
         ApplyMove("PlayKnightCard", cardId.ToString(), (g, me) => g.PlayKnightCard(me, cardId));
 
-    public Task PlayMonopoly(Guid cardId, string resource) =>
-        ApplyMove("PlayMonopoly", resource, (g, me) => g.PlayMonopoly(me, cardId, resource));
+    public async Task PlayMonopoly(Guid cardId, string resource)
+    {
+        var (room, me) = CurrentActor();
+
+        (int Collected, GameStateDto State) result;
+        try
+        {
+            result = room.Game.PlayMonopoly(me, cardId, resource);
+        }
+        catch (GameRuleException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+
+        await Clients.Group(room.Id).SystemMessage(new SystemMessageDto(
+            $"Player {NameOf(room, me)} played Monopoly and stole {result.Collected} {resource} from everyone.",
+            "bad", DateTimeOffset.UtcNow));
+        await BroadcastGameState(room, result.State);
+    }
 
     public Task PlayYearOfPlenty(Guid cardId, string res1, string res2) =>
         ApplyMove("PlayYearOfPlenty", $"{res1}+{res2}", (g, me) => g.PlayYearOfPlenty(me, cardId, res1, res2));
@@ -295,8 +413,16 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         await Clients.Group(room.Id).RobberMoved(result.Event);
-        await Clients.Group(room.Id).GameState(result.State);
+        if (result.Event is { VictimId: { } victimId, StolenResource: { } stolen })
+        {
+            await Clients.Group(room.Id).SystemMessage(new SystemMessageDto(
+                $"Player {NameOf(room, me)} stole 1 {stolen} from Player {NameOf(room, victimId)}.",
+                "bad", DateTimeOffset.UtcNow));
+        }
+        await BroadcastGameState(room, result.State);
     }
+
+    private static string NameOf(Room room, Guid playerId) => room.FindById(playerId)?.Name ?? "Someone";
 
     public Task PlaceInitialSettlement(string nodeId) =>
         ApplyMove("PlaceInitialSettlement", nodeId, (g, me) => g.PlaceInitialSettlement(me, nodeId));
@@ -322,13 +448,31 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         _logger.LogInformation("[{RoomId}] {Move} at {Target} by {Player}", room.Id, move, target, me);
-        await Clients.Group(room.Id).GameState(state);
+        await BroadcastGameState(room, state);
 
         if (state.Phase == nameof(GamePhase.GameOver) && state.WinnerId is { } winnerId)
         {
-            var winner = state.Players.First(p => p.Id == winnerId);
+            var winner = state.Players.First(p => p.Id == winnerId).Redacted();
             await Clients.Group(room.Id).GameOver(winner);
         }
+    }
+
+    /// <summary>
+    /// Information hiding: each connected seat receives its own <see cref="ClientGameStateDto"/>
+    /// with only its own hand revealed. The full state never crosses the wire.
+    /// </summary>
+    private async Task BroadcastGameState(Room room, GameStateDto state)
+    {
+        var sends = room.Members
+            .Where(m => m.ConnectionId is not null)
+            .Select(m => Clients.Client(m.ConnectionId!).GameState(new ClientGameStateDto(state, m.Id)));
+
+        await Task.WhenAll(sends);
+
+        // Every successful move may have handed the clock to someone else.
+        _timers.Sync(room);
+        // ...or handed the turn (or a trade/discard decision) to a bot.
+        _bots.Sync(room);
     }
 
     private Room CurrentRoom() =>
