@@ -111,7 +111,7 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
       {/* Floating rail */}
       <nav
         aria-label="Side panels"
-        className={`fixed right-3 top-1/2 z-[60] flex -translate-y-1/2 flex-col gap-2 transition-transform duration-300 max-md:right-1.5 max-md:gap-1 ${
+        className={`fixed right-3 top-1/2 z-[60] flex -translate-y-1/2 flex-col gap-2 transition-transform duration-300 max-md:right-[max(0.375rem,env(safe-area-inset-right))] max-md:gap-1 ${
           open ? '-translate-x-80' : ''
         }`}
       >
@@ -160,7 +160,7 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
       <aside
         aria-label={TABS.find((t) => t.id === open)?.label ?? 'Side panel'}
         aria-hidden={!open}
-        className={`fixed right-0 top-0 z-50 flex h-full w-80 max-w-[85vw] flex-col border-l border-amber-700/50 bg-gray-900/90 p-4 shadow-2xl backdrop-blur-md transition-transform duration-300 ease-out max-md:w-64 max-md:p-3 ${
+        className={`fixed right-0 top-0 z-50 flex h-[100dvh] w-80 max-w-[85vw] flex-col border-l border-amber-700/50 bg-gray-900/90 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pr-[max(1rem,env(safe-area-inset-right))] pt-[max(1rem,env(safe-area-inset-top))] shadow-2xl backdrop-blur-md transition-transform duration-300 ease-out max-md:w-64 max-md:p-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:pr-[max(0.75rem,env(safe-area-inset-right))] max-md:pt-[max(0.75rem,env(safe-area-inset-top))] ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
       >

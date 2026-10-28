@@ -36,7 +36,7 @@ export function LandingPage({ onCreate, onJoin, disabled, error }) {
   };
 
   return (
-    <main className="flex h-svh items-center justify-center overflow-y-auto border border-amber-700/50 bg-gray-900/90 backdrop-blur-md p-6">
+    <main className="flex h-[100dvh] min-h-[100dvh] w-[100dvw] items-center justify-center overflow-y-auto border border-amber-700/50 bg-gray-900/90 p-[max(1.5rem,env(safe-area-inset-top))_max(1.5rem,env(safe-area-inset-right))_max(1.5rem,env(safe-area-inset-bottom))_max(1.5rem,env(safe-area-inset-left))] backdrop-blur-md">
       <section className="w-full max-w-sm rounded-2xl bg-gray-900/70 ring-1 ring-amber-800/40 p-6 shadow-2xl ring-1 ring-amber-700/50">
         <h1 className="text-center text-3xl font-bold tracking-tight text-parchment-50">Catan</h1>
         <p className="mt-1 text-center text-sm text-parchment-200">Play with friends over the network</p>
@@ -106,7 +106,7 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onAddBot, onRe
   const copyCode = () => navigator.clipboard?.writeText(room.roomId).catch(() => {});
 
   return (
-    <main className="flex h-svh items-center justify-center overflow-y-auto border border-amber-700/50 bg-gray-900/90 backdrop-blur-md p-6">
+    <main className="flex h-[100dvh] min-h-[100dvh] w-[100dvw] items-center justify-center overflow-y-auto border border-amber-700/50 bg-gray-900/90 p-[max(1.5rem,env(safe-area-inset-top))_max(1.5rem,env(safe-area-inset-right))_max(1.5rem,env(safe-area-inset-bottom))_max(1.5rem,env(safe-area-inset-left))] backdrop-blur-md">
       <section className="w-full max-w-md rounded-2xl bg-gray-900/70 ring-1 ring-amber-800/40 p-6 shadow-2xl ring-1 ring-amber-700/50">
         <p className="text-center text-xs font-semibold uppercase tracking-wide text-parchment-300/80">Room code</p>
         <button

@@ -41,7 +41,7 @@ function StatusScreen({ status, error }) {
   const isError = status === 'error' || status === 'disconnected';
 
   return (
-    <main className="bg-tavern flex h-screen w-screen flex-col items-center justify-center gap-4 overflow-hidden p-6 text-center">
+    <main className="bg-tavern flex h-[100dvh] min-h-[100dvh] w-[100dvw] flex-col items-center justify-center gap-4 overflow-hidden p-[max(1.5rem,env(safe-area-inset-top))_max(1.5rem,env(safe-area-inset-right))_max(1.5rem,env(safe-area-inset-bottom))_max(1.5rem,env(safe-area-inset-left))] text-center">
       {!isError && (
         <span
           className="size-10 animate-spin rounded-full border-4 border-amber-900/60 border-t-amber-300"
@@ -344,7 +344,7 @@ export default function App() {
   };
 
   return (
-    <main className="bg-tavern flex h-screen w-screen max-h-screen max-w-screen flex-col overflow-hidden text-parchment-100">
+    <main className="bg-tavern flex h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-[100dvw] max-w-[100dvw] flex-col overflow-hidden px-safe pb-safe pt-safe text-parchment-100">
       <RotateDeviceOverlay />
       {/* ---- Top: title strip + player status bar (flex-none) ---- */}
       <header className="flex flex-none flex-col gap-0.5 px-2 pr-14 pt-0.5 max-md:gap-0 max-md:px-1 max-md:pr-12">
