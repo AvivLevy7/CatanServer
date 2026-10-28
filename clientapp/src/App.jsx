@@ -344,12 +344,12 @@ export default function App() {
   return (
     <main className="bg-tavern flex h-screen w-screen max-h-screen max-w-screen flex-col overflow-hidden text-parchment-100">
       {/* ---- Top: title strip + player status bar (flex-none) ---- */}
-      <header className="flex flex-none flex-col gap-1 px-2 pr-16 pt-1">
+      <header className="flex flex-none flex-col gap-0.5 px-2 pr-14 pt-0.5">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="font-display text-xl font-black tracking-[0.3em] text-transparent bg-gradient-to-b from-amber-100 via-amber-300 to-amber-600 bg-clip-text drop-shadow-[0_2px_12px_rgba(245,190,90,0.35)]">
+          <h1 className="font-display text-sm font-black tracking-[0.3em] text-transparent bg-gradient-to-b from-amber-100 via-amber-300 to-amber-600 bg-clip-text drop-shadow-[0_2px_12px_rgba(245,190,90,0.35)]">
             CATAN
           </h1>
-          <p className="flex min-w-0 flex-wrap items-center justify-end gap-2 text-xs text-parchment-300/80">
+          <p className="flex min-w-0 flex-nowrap items-center justify-end gap-2 overflow-hidden whitespace-nowrap text-[11px] text-parchment-300/80">
             <span
               className={`inline-block size-2 rounded-full ${
                 isLive ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-amber-400'
@@ -412,10 +412,10 @@ export default function App() {
       </header>
 
       {/* ---- Middle: board (flex-1 min-h-0) with phase/dice rail alongside ---- */}
-      <div className="flex min-h-0 w-full flex-1 gap-2 px-2 pr-16 pt-1">
+      <div className="flex min-h-0 w-full flex-1 gap-1 px-1 pr-14 pt-0.5">
         <section
           aria-label="Board"
-          className="flex min-h-0 min-w-0 w-full flex-1 items-center justify-center overflow-hidden rounded-2xl border border-amber-800/40 bg-gradient-to-b from-sky-950/70 to-ink-900/70 p-2 shadow-2xl shadow-black/60 backdrop-blur-sm"
+          className="flex min-h-0 min-w-0 w-full flex-1 items-center justify-center overflow-hidden rounded-2xl border border-amber-800/40 bg-gradient-to-b from-sky-950/70 to-ink-900/70 p-1 shadow-2xl shadow-black/60 backdrop-blur-sm"
         >
           <Board
             tiles={tiles}
@@ -433,7 +433,7 @@ export default function App() {
           />
         </section>
 
-        <aside className="hidden min-h-0 w-52 flex-none flex-col gap-2 overflow-x-hidden overflow-y-auto lg:flex">
+        <aside className="hidden min-h-0 w-44 flex-none flex-col gap-1 overflow-x-hidden overflow-y-auto lg:flex">
           <PhaseBanner
             game={game}
             currentPlayer={currentPlayer}
@@ -453,8 +453,8 @@ export default function App() {
             waitingOnRobber={isMovingRobber || isDiscarding}
             isRolling={isRolling}
           />
-          <div className="flex-none overflow-hidden p-1">
-            <button type="button" onClick={leaveRoom} className={`${BTN_GHOST} w-full hover:scale-100`}>
+          <div className="flex-none overflow-hidden p-0.5">
+            <button type="button" onClick={leaveRoom} className={`${BTN_GHOST} w-full px-3 py-1 text-xs hover:scale-100`}>
               Leave room
             </button>
           </div>
@@ -462,17 +462,17 @@ export default function App() {
       </div>
 
       {/* ---- Bottom: action bar + card hand (flex-none) ---- */}
-      <div className="flex w-full flex-none items-end gap-2 px-2 pb-2 pr-16 pt-1">
+      <div className="flex w-full flex-none items-end gap-1 px-1 pb-1 pr-14 pt-0.5">
         {/* Action bar */}
-        <section aria-label="Actions" className="panel-glass flex w-44 flex-none flex-col items-stretch gap-1 p-2">
+        <section aria-label="Actions" className="panel-glass flex w-36 flex-none flex-col items-stretch gap-1 p-1.5">
           <button
             type="button"
             onClick={() => setTradeOpenTurn(game?.turnNumber ?? 0)}
             disabled={!canBuild}
             title={!isMainGame ? 'Trading opens in the main game' : !isMyTurn ? 'Wait for your turn' : !hasRolled ? 'Roll the dice first' : 'Trade with players, the bank or your ports'}
-            className="group relative overflow-hidden rounded-lg border border-amber-300/60 bg-gradient-to-b from-amber-200 via-amber-400 to-amber-600 px-4 py-2 font-display text-sm font-black uppercase tracking-[0.3em] text-ink-900 shadow-[0_0_18px_rgba(245,190,90,0.35)] ring-1 ring-amber-100/70 transition-all hover:scale-105 hover:shadow-[0_0_28px_rgba(245,190,90,0.6)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
+            className="group relative overflow-hidden rounded-md border border-amber-300/60 bg-gradient-to-b from-amber-200 via-amber-400 to-amber-600 px-3 py-1 font-display text-xs font-black uppercase tracking-[0.25em] text-ink-900 shadow-[0_0_14px_rgba(245,190,90,0.35)] ring-1 ring-amber-100/70 transition-all hover:brightness-110 hover:shadow-[0_0_22px_rgba(245,190,90,0.6)] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <span className="relative z-10">? Trade</span>
+            <span className="relative z-10">Trade</span>
             <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
           </button>
           <p className="truncate text-center text-[10px] italic leading-snug text-parchment-300/80">
@@ -489,7 +489,7 @@ export default function App() {
         </section>
 
         {/* Hand */}
-        <div className="min-w-0 flex-1 overflow-x-auto overflow-y-visible">
+        <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
           {me && (
             <CardHand
               player={me}

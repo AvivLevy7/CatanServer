@@ -11,7 +11,7 @@ const DEV_META = {
 
 // Compact physical-card footprint; the hand row reserves exactly this height plus hover lift.
 const CARD_BASE =
-  'relative flex h-24 w-16 shrink-0 select-none flex-col items-center justify-between rounded-xl border-2 border-amber-200/60 bg-gradient-to-b p-1.5 text-center shadow-[0_6px_14px_rgba(0,0,0,0.6)] ring-1 transition-transform duration-200 ease-out hover:-translate-y-4 hover:z-10 hover:scale-105';
+  'relative flex h-16 w-12 shrink-0 select-none flex-col items-center justify-between rounded-lg border border-amber-200/60 bg-gradient-to-b p-1 text-center shadow-[0_4px_10px_rgba(0,0,0,0.6)] ring-1 transition-transform duration-200 ease-out hover:-translate-y-2 hover:z-10 hover:scale-105';
 
 function CardFrame({ children, className = '', ...rest }) {
   return (
@@ -27,19 +27,19 @@ function ResourceCardFace({ resource, count, index }) {
   const label = RESOURCES.find((r) => r.key === resource)?.label ?? resource;
   return (
     <CardFrame
-      className={`${style.card} ${style.ink} cursor-pointer ${index > 0 ? '-ml-4' : ''}`}
+      className={`${style.card} ${style.ink} cursor-pointer ${index > 0 ? '-ml-3' : ''}`}
       style={{ zIndex: index }}
       title={`${count} ${label}`}
       role="img"
       aria-label={`${count} ${label}`}
     >
-      <span className="font-display text-[8px] font-bold uppercase tracking-wider opacity-90">{label}</span>
-      <span className="text-3xl leading-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.65)]" aria-hidden="true">
+      <span className="font-display text-[7px] font-bold uppercase tracking-wider opacity-90">{label}</span>
+                <span className="text-xl leading-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.65)]" aria-hidden="true">
         {style.glyph}
       </span>
-      <span className="font-display text-[10px] font-black tracking-wide opacity-90">&times;{count}</span>
+      <span className="font-display text-[9px] font-black tracking-wide opacity-90">&times;{count}</span>
       {count > 1 && (
-        <span className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-amber-100 bg-ink-900 font-display text-[10px] font-black text-amber-200 shadow-lg">
+        <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full border border-amber-100 bg-ink-900 font-display text-[9px] font-black text-amber-200 shadow-lg">
           {count}
         </span>
       )}
@@ -55,7 +55,7 @@ function DevCardFace({ card, onPlay, disabled, index }) {
 
   return (
     <CardFrame
-      className={`${meta.face} text-parchment-50 ${index > 0 ? '-ml-4' : ''} ${playable ? 'animate-glow cursor-pointer' : 'cursor-not-allowed'} ${
+      className={`${meta.face} text-parchment-50 ${index > 0 ? '-ml-3' : ''} ${playable ? 'animate-glow cursor-pointer' : 'cursor-not-allowed'} ${
         !playable && !isVp ? 'opacity-60 saturate-50' : ''
       }`}
       style={{ zIndex: index }}
@@ -72,7 +72,7 @@ function DevCardFace({ card, onPlay, disabled, index }) {
       }}
     >
       <span className="font-display text-[7px] font-bold uppercase leading-tight tracking-wider">{meta.label}</span>
-      <span className="text-3xl leading-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.65)]" aria-hidden="true">
+      <span className="text-xl leading-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.65)]" aria-hidden="true">
         {meta.glyph}
       </span>
       <span className="font-display text-[7px] font-semibold uppercase tracking-wider opacity-90">
@@ -86,7 +86,7 @@ function CardBack({ label }) {
   return (
     <CardFrame className="cursor-default from-ink-800 to-ink-900 opacity-80 ring-amber-700/50">
       <span className="pointer-events-none absolute inset-2 rounded-lg border border-amber-600/30 bg-[repeating-linear-gradient(45deg,rgba(245,190,90,0.08)_0_6px,transparent_6px_12px)]" aria-hidden="true" />
-      <span className="relative mb-auto mt-auto font-display text-2xl font-black text-amber-400/70">C</span>
+      <span className="relative mb-auto mt-auto font-display text-lg font-black text-amber-400/70">C</span>
       <span className="relative font-display text-[7px] uppercase tracking-widest text-parchment-300">{label}</span>
     </CardFrame>
   );
@@ -107,10 +107,10 @@ export default function CardHand({ player, onPlayDevCard, onBuyDevCard, canBuy, 
   return (
     <section
       aria-label="Your hand"
-      className="panel-glass flex items-end justify-center gap-4 overflow-visible px-4 pb-2 pt-5"
+      className="panel-glass flex items-end justify-center gap-3 overflow-visible px-3 pb-1 pt-3"
     >
       {/* Resources */}
-      <div className="flex flex-col items-center gap-2">
+      <div className="flex flex-col items-center gap-1">
         <div className="flex items-end">
           {total === 0 && <CardBack label="Empty" />}
           {owned.map(({ key }, i) => (
@@ -123,18 +123,18 @@ export default function CardHand({ player, onPlayDevCard, onBuyDevCard, canBuy, 
       </div>
 
       {/* Divider */}
-      <div className="h-20 w-px self-center bg-gradient-to-b from-transparent via-amber-500/60 to-transparent" aria-hidden="true" />
+      <div className="h-14 w-px self-center bg-gradient-to-b from-transparent via-amber-500/60 to-transparent" aria-hidden="true" />
 
       {/* Development cards */}
-      <div className="flex flex-col items-center gap-2">
+      <div className="flex flex-col items-center gap-1">
         <div className="flex items-end">
-          {devCards.length === 0 && <CardBack label="No cards" />}
+          {devCards.length === 0 && <CardBack label={deckRemaining != null ? `${deckRemaining} in deck` : 'None'} />}
           {devCards.map((card, i) => (
             <DevCardFace key={card.id} card={card} onPlay={onPlayDevCard} disabled={!canPlay} index={i} />
           ))}
         </div>
         <span className="flex items-center gap-3 font-display text-[10px] font-bold uppercase tracking-[0.3em] text-amber-300/90">
-          Development
+          Development <span className="text-parchment-300/70">({devCards.length})</span>
           <button
             type="button"
             onClick={onBuyDevCard}

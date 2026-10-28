@@ -11,8 +11,8 @@ import { HEX_SIZE, HEX_WIDTH, VERTICAL_STEP, cornerPosition } from '../hexGeomet
 const BOARD_WIDTH = Math.max(...ROW_LENGTHS) * HEX_WIDTH;
 const BOARD_HEIGHT = (ROW_LENGTHS.length - 1) * VERTICAL_STEP + 2 * HEX_SIZE;
 
-// Breathing room so hover scaling, stroke widths and port badges never clip at the edges.
-const PADDING = 48;
+// Must clear the port shields (OFFSET 0.62 * HEX_SIZE + shield radius 0.3 * HEX_SIZE) plus hover scaling.
+const PADDING = HEX_SIZE * 0.98;
 
 export default function Board({
   tiles,

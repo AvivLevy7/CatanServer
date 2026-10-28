@@ -46,14 +46,14 @@ export default function PhaseBanner({ game, currentPlayer, robberMover, isMyTurn
   return (
     <section
       aria-live="polite"
-      className={`rounded-2xl border px-4 py-3 text-center shadow-2xl backdrop-blur-md ${
+      className={`rounded-xl border px-3 py-1.5 text-center shadow-2xl backdrop-blur-md ${
         highlight
           ? 'animate-glow border-amber-300/70 bg-gradient-to-b from-amber-200/95 to-amber-400/95 text-ink-900'
           : 'border-amber-700/50 bg-gray-900/80 text-parchment-100'
       }`}
     >
       <p className="font-display text-[10px] font-bold uppercase tracking-[0.3em] opacity-80">{title}</p>
-      <p className="mt-0.5 text-base">
+      <p className="mt-0.5 text-sm">
         <span className={`font-display font-bold ${highlight ? '' : colorClass}`}>
           {isMyTurn ? 'You' : `${actor.name} (${seat(actor.color).label})`}
         </span>

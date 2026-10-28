@@ -15,7 +15,7 @@ function Die({ value, tumbling = false }) {
 
   return (
     <span
-      className={`grid size-14 grid-cols-3 grid-rows-3 gap-0.5 rounded-lg bg-gradient-to-br from-parchment-50 to-parchment-300 p-2 shadow-[inset_0_-3px_6px_rgba(0,0,0,0.25),0_6px_12px_rgba(0,0,0,0.5)] ring-1 ring-amber-900/40 ${
+      className={`grid size-10 grid-cols-3 grid-rows-3 gap-0.5 rounded-lg bg-gradient-to-br from-parchment-50 to-parchment-300 p-1.5 shadow-[inset_0_-3px_6px_rgba(0,0,0,0.25),0_6px_12px_rgba(0,0,0,0.5)] ring-1 ring-amber-900/40 ${
         tumbling ? 'animate-bounce' : ''
       }`}
       role="img"
@@ -75,7 +75,7 @@ export default function DicePanel({
   return (
     <section
       aria-label="Dice"
-      className="panel-glass flex flex-col items-center gap-3 p-4"
+      className="panel-glass flex flex-col items-center gap-1.5 p-2"
     >
       <p className="font-display text-[11px] font-bold uppercase tracking-[0.25em] text-amber-300/90">
         {currentPlayer ? (isMyTurn ? 'Your turn' : `${currentPlayer.name}'s turn`) : 'Waiting for players'}
@@ -88,11 +88,11 @@ export default function DicePanel({
         </>
       ) : roll ? (
         <>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <Die value={roll.first} />
             <Die value={roll.second} />
             <span
-              className={`ml-1 font-display text-4xl font-black tabular-nums drop-shadow ${
+              className={`ml-1 font-display text-2xl font-black tabular-nums drop-shadow ${
                 total === 7 ? 'text-rose-400' : 'text-amber-200'
               }`}
             >
@@ -104,7 +104,7 @@ export default function DicePanel({
           )}
         </>
       ) : (
-        <p className="py-3 text-sm italic text-parchment-300">No roll yet</p>
+        <p className="py-1 text-xs italic text-parchment-300">No roll yet</p>
       )}
 
       {isMyTurn ? (
@@ -115,7 +115,7 @@ export default function DicePanel({
               onClick={onRoll}
               disabled={!canRoll || isRolling}
               title={waitingOnRobber ? 'Resolve the robber first' : hasRolled ? 'Already rolled this turn' : undefined}
-              className="rounded-lg bg-gradient-to-b from-amber-200 to-amber-400 px-4 py-2 font-display text-sm font-bold tracking-wide text-ink-900 shadow-lg shadow-amber-900/40 ring-1 ring-amber-100/70 transition-all hover:scale-[1.03] hover:from-amber-100 hover:to-amber-300 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
+              className="rounded-md bg-gradient-to-b from-amber-200 to-amber-400 px-3 py-1 font-display text-xs font-bold tracking-wide text-ink-900 shadow-lg shadow-amber-900/40 ring-1 ring-amber-100/70 transition-all hover:from-amber-100 hover:to-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Roll Dice
             </button>
@@ -125,7 +125,7 @@ export default function DicePanel({
                 onClick={onEndTurn}
                 disabled={!canEndTurn || isRolling}
                 title={!hasRolled ? 'You must roll before ending your turn' : undefined}
-                className="rounded-lg border border-amber-600/50 bg-gray-900/40 px-4 py-2 font-display text-sm font-semibold tracking-wide text-parchment-100 transition-all hover:scale-[1.02] hover:border-amber-400 hover:bg-gray-900/70 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
+                className="rounded-md border border-amber-600/50 bg-gray-900/40 px-3 py-1 font-display text-xs font-semibold tracking-wide text-parchment-100 transition-all hover:border-amber-400 hover:bg-gray-900/70 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 End Turn
               </button>

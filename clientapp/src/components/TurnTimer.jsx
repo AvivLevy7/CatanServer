@@ -27,21 +27,21 @@ export default function TurnTimer({ deadline, total = 60, label }) {
       role="timer"
       aria-live={urgent ? 'assertive' : 'off'}
       aria-label={`${seconds} seconds left`}
-      className={`flex min-w-[9rem] flex-col gap-1 rounded-2xl border px-3 py-2 shadow-2xl backdrop-blur-md transition ${
+      className={`flex min-w-[6.5rem] flex-col justify-center gap-0.5 rounded-xl border px-2 py-1 shadow-2xl backdrop-blur-md transition ${
         urgent ? 'animate-pulse border-rose-400 bg-rose-950/80' : 'border-amber-700/50 bg-gray-900/80'
       }`}
     >
       <div className="flex items-baseline justify-between gap-2">
         <span className="font-display text-[9px] font-bold uppercase tracking-[0.2em] text-amber-300/80">{label ?? 'Turn clock'}</span>
         <span
-          className={`font-display text-2xl font-black tabular-nums leading-none ${
+          className={`font-display text-base font-black tabular-nums leading-none ${
             urgent ? 'text-rose-200' : 'text-parchment-50'
           }`}
         >
           {String(Math.floor(seconds / 60)).padStart(1, '0')}:{String(seconds % 60).padStart(2, '0')}
         </span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/60 ring-1 ring-amber-900/40">
+      <div className="h-1 w-full overflow-hidden rounded-full bg-black/60 ring-1 ring-amber-900/40">
         <div
           className={`h-full rounded-full transition-[width] duration-200 ${
             urgent ? 'bg-rose-400' : fraction < 0.5 ? 'bg-amber-300' : 'bg-emerald-400'
