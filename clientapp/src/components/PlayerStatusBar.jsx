@@ -1,26 +1,32 @@
-import { seat, RESOURCE_STYLE } from '../theme';
+import { seat } from '../theme';
 import { RESOURCES } from '../resources';
+import { CardsIcon, CrownIcon, DevCardIcon, KnightIcon, RoadIcon, StarIcon } from './icons';
 
-/** Heraldic shield badge used for VP / Knights / Road. */
-function Shield({ value, label, title, tone = 'gold', lit = false }) {
-  const tones = {
-    gold: 'from-amber-200 via-amber-400 to-amber-700 text-ink-900',
-    crimson: 'from-rose-300 via-rose-500 to-rose-900 text-rose-50',
-    emerald: 'from-emerald-200 via-emerald-500 to-emerald-900 text-emerald-50',
-    slate: 'from-stone-400 via-stone-600 to-stone-900 text-stone-100',
-  };
+const TONES = {
+  gold: 'bg-amber-400/15 text-amber-200 ring-amber-300/40',
+  crimson: 'bg-rose-500/20 text-rose-200 ring-rose-300/50',
+  emerald: 'bg-emerald-500/20 text-emerald-200 ring-emerald-300/50',
+  slate: 'bg-black/35 text-parchment-200 ring-amber-900/40',
+  violet: 'bg-violet-500/20 text-violet-200 ring-violet-300/40',
+  danger: 'bg-rose-600/25 text-rose-100 ring-rose-400/60',
+};
+
+/**
+ * One icon + count pill. `title` carries the meaning that used to be printed as a text
+ * label, so the HUD stays wordless without losing it for screen readers or hover.
+ */
+function Stat({ icon: Glyph, value, title, tone = 'slate', lit = false }) {
   return (
-    <div className="flex flex-col items-center gap-0.5" title={title}>
-      <div
-        className={`relative flex h-9 w-8 items-center justify-center bg-gradient-to-b font-display text-sm font-black tabular-nums shadow-lg ring-1 ring-black/40 transition-all hover:scale-110 ${
-          tones[tone]
-        } ${lit ? 'animate-glow' : ''}`}
-        style={{ clipPath: 'polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%)' }}
-      >
-        {value}
-      </div>
-      <span className="font-display text-[9px] uppercase tracking-widest text-parchment-300/80">{label}</span>
-    </div>
+    <span
+      title={title}
+      aria-label={`${title}: ${value}`}
+      className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 font-display text-[11px] font-black tabular-nums ring-1 max-md:gap-0.5 max-md:px-1 max-md:text-[10px] ${TONES[tone]} ${
+        lit ? 'animate-glow' : ''
+      }`}
+    >
+      <Glyph className="size-3.5 shrink-0 max-md:size-3" />
+      {value}
+    </span>
   );
 }
 
@@ -35,110 +41,93 @@ function PlayerChip({ player, isCurrentTurn, isMe, hasLargestArmy, hasLongestRoa
   return (
     <li
       aria-current={isCurrentTurn ? 'true' : undefined}
-      className={`panel-glass relative flex min-w-0 flex-1 items-center gap-2 overflow-hidden px-2 py-1 transition-all max-md:gap-1 max-md:px-1 max-md:py-0.5 ${
-        isCurrentTurn ? `ring-2 ${s.ring} shadow-[0_0_24px_rgba(245,190,90,0.25)]` : 'opacity-85 hover:opacity-100'
+      className={`panel-glass pointer-events-auto relative flex shrink-0 items-center gap-2 overflow-hidden rounded-xl py-1 pl-3 pr-2 transition-all max-md:gap-1 max-md:rounded-lg max-md:py-0.5 max-md:pl-2 max-md:pr-1.5 ${
+        isCurrentTurn
+          ? `ring-2 ${s.ring} shadow-[0_0_26px_rgba(245,190,90,0.3)]`
+          : 'opacity-80 hover:opacity-100'
       }`}
     >
       {/* Heraldic colour band */}
-      <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-1 bg-gradient-to-b ${s.gradient}`} />
+      <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b ${s.gradient}`} />
 
-      <div className="flex min-w-0 items-center gap-1.5 pl-1">
-        <span className={`inline-block size-2.5 rounded-full ring-1 ring-black/40 ${s.dot}`} />
-        <span className="truncate font-display text-xs font-bold tracking-wide text-parchment-50 max-md:text-[10px]">{player.name}</span>
-        {isMe && <span className="font-display text-[8px] uppercase tracking-widest text-amber-300/80">you</span>}
-        {isCurrentTurn && (
-          <span className="rounded-sm bg-gradient-to-b from-amber-200 to-amber-500 px-1 py-px font-display text-[8px] font-black uppercase tracking-widest text-ink-900 shadow">
-            Turn
-          </span>
+      <div className="flex min-w-0 items-center gap-1.5 max-md:gap-1">
+        {isCurrentTurn ? (
+          <CrownIcon className="size-3.5 shrink-0 text-amber-300 drop-shadow-[0_0_6px_rgba(245,190,90,0.8)] max-md:size-3" />
+        ) : (
+          <span className={`inline-block size-2.5 shrink-0 rounded-full ring-1 ring-black/40 ${s.dot}`} />
         )}
+        <span
+          className={`max-w-[7rem] truncate font-display text-xs font-bold tracking-wide max-md:max-w-[4.5rem] max-md:text-[10px] ${
+            isMe ? 'text-amber-100' : 'text-parchment-50'
+          }`}
+          title={isMe ? `${player.name} (you)` : player.name}
+        >
+          {player.name}
+        </span>
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center gap-2 max-md:gap-1">
-        <Shield value={player.victoryPoints} label="VP" title="Victory points" tone="gold" lit={isCurrentTurn} />
-        <div className="flex items-center gap-2 max-md:hidden">
-          <Shield
-            value={player.knightsPlayed ?? 0}
-            label="Knights"
-            title={hasLargestArmy ? 'Largest Army (+2 VP)' : 'Knights played'}
-            tone={hasLargestArmy ? 'crimson' : 'slate'}
-            lit={hasLargestArmy}
-          />
-          <Shield
-            value={player.longestRoadLength ?? 0}
-            label="Road"
-            title={hasLongestRoad ? 'Longest Road (+2 VP)' : 'Longest road length'}
-            tone={hasLongestRoad ? 'emerald' : 'slate'}
-            lit={hasLongestRoad}
-          />
-        </div>
-
-        <div className="ml-auto flex items-center gap-1 text-[10px] max-md:hidden">
-          {isMe ? (
-            <ul className="flex gap-0.5" aria-label="Your resources">
-              {RESOURCES.map(({ key, label }) => {
-                const r = RESOURCE_STYLE[key];
-                return (
-                  <li
-                    key={key}
-                    title={label}
-                    className={`flex h-6 w-5 flex-col items-center justify-center rounded bg-gradient-to-b ${r.card} ${r.ink} ring-1 text-[9px] font-bold shadow`}
-                  >
-                    <span className="text-[10px] leading-none">{r.glyph}</span>
-                    <span className="leading-none">{player.resources?.[key] ?? 0}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <>
-              <span
-                className={`rounded px-1 py-px font-display font-semibold ring-1 ${
-                  atRiskOnSeven
-                    ? 'bg-rose-950/80 text-rose-200 ring-rose-500/60'
-                    : 'bg-ink-900/70 text-parchment-100 ring-amber-800/40'
-                }`}
-                title={atRiskOnSeven ? 'Holds more than 7 cards: discards on a 7' : 'Resource cards in hand'}
-              >
-                {resourceCount} cards
-              </span>
-              <span
-                className="rounded bg-violet-950/80 px-1 py-px font-display font-semibold text-violet-200 ring-1 ring-violet-500/50"
-                title="Unplayed development cards"
-              >
-                {devCardCount} dev
-              </span>
-            </>
-          )}
-        </div>
+      <div className="flex items-center gap-1 max-md:gap-0.5">
+        <Stat
+          icon={StarIcon}
+          value={player.victoryPoints}
+          title="Victory points"
+          tone="gold"
+          lit={isCurrentTurn}
+        />
+        <Stat
+          icon={KnightIcon}
+          value={player.knightsPlayed ?? 0}
+          title={hasLargestArmy ? 'Largest Army (+2 VP)' : 'Knights played'}
+          tone={hasLargestArmy ? 'crimson' : 'slate'}
+          lit={hasLargestArmy}
+        />
+        <Stat
+          icon={RoadIcon}
+          value={player.longestRoadLength ?? 0}
+          title={hasLongestRoad ? 'Longest Road (+2 VP)' : 'Longest road'}
+          tone={hasLongestRoad ? 'emerald' : 'slate'}
+          lit={hasLongestRoad}
+        />
+        <Stat
+          icon={CardsIcon}
+          value={resourceCount}
+          title={atRiskOnSeven ? 'Resource cards: discards on a 7' : 'Resource cards in hand'}
+          tone={atRiskOnSeven ? 'danger' : 'slate'}
+        />
+        <Stat
+          icon={DevCardIcon}
+          value={devCardCount}
+          title="Unplayed development cards"
+          tone="violet"
+        />
       </div>
     </li>
   );
 }
 
-/** Horizontal strip of heraldic player cards for the top of the game screen. */
+/** Row of heraldic seat chips that floats over the top edge of the board. */
 export default function PlayerStatusBar({
   players,
   currentTurnPlayerId,
   myPlayerId,
   largestArmyHolderId,
   longestRoadHolderId,
-  timer,
 }) {
   return (
-    <section aria-label="Players" className="flex flex-nowrap items-stretch gap-1">
-      <ul className="flex min-w-0 flex-1 flex-nowrap gap-1">
-        {players.map((player) => (
-          <PlayerChip
-            key={player.id}
-            player={player}
-            isCurrentTurn={player.id === currentTurnPlayerId}
-            isMe={player.id === myPlayerId}
-            hasLargestArmy={player.id === largestArmyHolderId}
-            hasLongestRoad={player.id === longestRoadHolderId}
-          />
-        ))}
-      </ul>
-      {timer}
-    </section>
+    <ul
+      aria-label="Players"
+      className="pointer-events-none flex min-w-0 max-w-full flex-nowrap items-stretch justify-center gap-1.5 overflow-x-auto px-1 max-md:gap-1"
+    >
+      {players.map((player) => (
+        <PlayerChip
+          key={player.id}
+          player={player}
+          isCurrentTurn={player.id === currentTurnPlayerId}
+          isMe={player.id === myPlayerId}
+          hasLargestArmy={player.id === largestArmyHolderId}
+          hasLongestRoad={player.id === longestRoadHolderId}
+        />
+      ))}
+    </ul>
   );
 }

@@ -16,7 +16,11 @@ const GAME_STATE_EVENT = 'GameState';
 const DICE_ROLLED_EVENT = 'DiceRolled';
 const ROBBER_MOVED_EVENT = 'RobberMoved';
 const GAME_OVER_EVENT = 'GameOver';
-export const DICE_ANIMATION_MS = 1500;
+// Cinematic dice roll: the pair tumbles, snaps to the real faces, then holds the result
+// before the HUD comes back. The resource payout is withheld for the whole window.
+export const DICE_TUMBLE_MS = 1150;
+export const DICE_REVEAL_MS = 650;
+export const DICE_ANIMATION_MS = DICE_TUMBLE_MS + DICE_REVEAL_MS;
 const TRADE_OFFERED_EVENT = 'TradeOffered';
 const TRADE_RESOLVED_EVENT = 'TradeResolved';
 
@@ -46,7 +50,10 @@ export function useGameHub() {
   // Room chat history for this page load.
   const [chatMessages, setChatMessages] = useState([]);
   const [isRolling, setIsRolling] = useState(false);
+  // Drives the full-screen dice overlay: { phase: 'tumbling' | 'reveal', roll, rolledBy }.
+  const [rollCinematic, setRollCinematic] = useState(null);
   const rollRevealRef = useRef(null);
+  const rollLandRef = useRef(null);
   // While the dice tumble, GameState updates are parked here and applied on reveal so
   // nobody sees their resources change before the result is shown.
   const rollingRef = useRef(false);
@@ -92,18 +99,28 @@ export function useGameHub() {
       setGame(nextGame);
     });
 
-    connection.on(DICE_ROLLED_EVENT, (roll) => {
+    connection.on(DICE_ROLLED_EVENT, (event) => {
       if (cancelled) return;
-      // Tumble for a moment before revealing; App locks the controls while isRolling.
-      // The post-roll GameState (with the resource payout) is held back until the reveal.
+      // Two beats: tumble blind, then snap to the real faces and hold. App locks the
+      // controls while isRolling, and the post-roll GameState (with the resource payout)
+      // is parked until the whole cinematic has played out.
       clearTimeout(rollRevealRef.current);
+      clearTimeout(rollLandRef.current);
       sound.play('dice');
       rollingRef.current = true;
       setIsRolling(true);
+      setRollCinematic({ phase: 'tumbling', roll: event?.roll ?? null, rolledBy: event?.rolledBy ?? null });
+
+      rollLandRef.current = setTimeout(() => {
+        if (cancelled) return;
+        setRollCinematic({ phase: 'reveal', roll: event?.roll ?? null, rolledBy: event?.rolledBy ?? null });
+      }, DICE_TUMBLE_MS);
+
       rollRevealRef.current = setTimeout(() => {
         if (cancelled) return;
         rollingRef.current = false;
-        setLastRoll(roll);
+        setRollCinematic(null);
+        setLastRoll(event);
         setIsRolling(false);
         if (deferredGameRef.current) {
           setGame(deferredGameRef.current);
@@ -140,6 +157,7 @@ export function useGameHub() {
       if (!cancelled) {
         setWinner(null);
         setLastRoll(null);
+        setRollCinematic(null);
         setLastRobbery(null);
         setLastTradeResult(null);
         setRestartCount((n) => n + 1);
@@ -206,6 +224,7 @@ export function useGameHub() {
     return () => {
       cancelled = true;
       clearTimeout(rollRevealRef.current);
+      clearTimeout(rollLandRef.current);
       connection.off(ROOM_STATE_EVENT);
       connection.off(BOARD_STATE_EVENT);
       connection.off(GAME_STATE_EVENT);
@@ -404,6 +423,7 @@ export function useGameHub() {
     restartCount,
     systemMessage,
     isRolling,
+    rollCinematic,
     lastRobbery,
     placeInitialSettlement,
     placeInitialRoad,

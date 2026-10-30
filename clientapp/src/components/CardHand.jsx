@@ -120,11 +120,11 @@ function CardBack({ label, small = false }) {
 }
 
 /**
- * The viewer's own hand as two fanned groups: resources (left/centre) and unplayed
- * development cards (right), separated by a gold rule. Only ever receives the viewer's
- * PlayerDto - the only one the server sends with resources/developmentCards populated.
+ * The viewer's own hand, floating at the bottom centre of the board: resources fanned on
+ * the left of a gold rule, unplayed development cards on its right. Only ever receives the
+ * viewer's PlayerDto - the only one the server sends with resources/developmentCards populated.
  */
-export default function CardHand({ player, onPlayDevCard, onBuyDevCard, canBuy, canPlay, deckRemaining, tradeSlot = null }) {
+export default function CardHand({ player, onPlayDevCard, canPlay, deckRemaining }) {
   // Which card is raised; a string key so resources and dev cards share one slot.
   const [selectedKey, setSelectedKey] = useState(null);
   const toggle = (key) => setSelectedKey((current) => (current === key ? null : key));
@@ -132,82 +132,52 @@ export default function CardHand({ player, onPlayDevCard, onBuyDevCard, canBuy, 
   const resources = player?.resources ?? {};
   const devCards = (player?.developmentCards ?? []).filter((c) => !c.isPlayed);
   const total = Object.values(resources).reduce((a, b) => a + b, 0);
-  const canAfford = (resources.Ore ?? 0) >= 1 && (resources.Grain ?? 0) >= 1 && (resources.Wool ?? 0) >= 1;
   const owned = RESOURCES.filter(({ key }) => (resources[key] ?? 0) > 0);
-
-  const buyDisabled = !canBuy || !canAfford || deckRemaining === 0;
-  const buyTitle = deckRemaining === 0
-    ? 'The development deck is empty'
-    : !canBuy
-      ? 'Roll the dice before buying'
-      : !canAfford
-        ? 'Needs Ore + Wheat + Sheep'
-        : `Buy a development card (Ore + Wheat + Sheep) \u2014 ${deckRemaining ?? '-'} left`;
 
   return (
     <section
       aria-label="Your hand"
-      className="panel-glass grid grid-cols-[auto_1fr_auto] items-end gap-3 overflow-visible px-3 pb-1 pt-3 max-md:gap-1.5 max-md:px-2 max-md:pb-0.5 max-md:pt-2"
+      className="panel-glass pointer-events-auto flex animate-hud-rise items-end gap-3 overflow-visible rounded-2xl px-3 py-2.5 max-md:gap-2 max-md:rounded-xl max-md:px-2 max-md:py-1.5"
     >
-      {/* Left: trade */}
-      <div className="flex w-36 flex-none flex-col justify-end self-center max-md:w-24" aria-label="Actions">
-        {tradeSlot}
+      {/* Resources */}
+      <div className="flex items-end" aria-label="Your resources">
+        {total === 0 && <CardBack label="Empty" />}
+        {owned.map(({ key }, i) => (
+          <ResourceCardFace
+            key={key}
+            resource={key}
+            count={resources[key]}
+            index={i}
+            selected={selectedKey === `res:${key}`}
+            onSelect={() => toggle(`res:${key}`)}
+          />
+        ))}
       </div>
 
-      {/* Centre: resources */}
-      <div className="flex min-w-0 flex-col items-center gap-1 overflow-x-auto overflow-y-visible max-md:gap-0.5">
-        <div className="flex items-end">
-          {total === 0 && <CardBack label="Empty" />}
-          {owned.map(({ key }, i) => (
-            <ResourceCardFace
-              key={key}
-              resource={key}
-              count={resources[key]}
-              index={i}
-              selected={selectedKey === `res:${key}`}
-              onSelect={() => toggle(`res:${key}`)}
-            />
-          ))}
-        </div>
-        <span className="font-display text-[10px] font-bold uppercase tracking-[0.3em] text-amber-300/90 max-md:text-[8px] max-md:tracking-[0.15em]">
-          Resources
-        </span>
-      </div>
+      {/* Gold rule between the two groups */}
+      <span
+        aria-hidden="true"
+        className="h-14 w-px self-center bg-gradient-to-b from-transparent via-amber-400/60 to-transparent max-md:h-10"
+      />
 
-      {/* Right: development cards + buy */}
-      <div className="flex flex-none flex-col items-center gap-1">
-        <div className="flex items-end gap-2 max-md:gap-1">
-          {devCards.length === 0 && <CardBack small label={deckRemaining != null ? `${deckRemaining} in deck` : 'None'} />}
-          {devCards.map((card, i) => (
-            <DevCardFace
-              key={card.id}
-              card={card}
-              onPlay={(c) => {
-                setSelectedKey(null);
-                onPlayDevCard(c);
-              }}
-              disabled={!canPlay}
-              index={i}
-              selected={selectedKey === `dev:${card.id}`}
-              onSelect={() => toggle(`dev:${card.id}`)}
-            />
-          ))}
-              <button
-                type="button"
-                onClick={onBuyDevCard}
-                disabled={buyDisabled}
-                title={buyTitle}
-                aria-label="Buy development card"
-                className="mb-1 flex size-9 shrink-0 items-center justify-center rounded-full border border-amber-100/70 bg-gradient-to-b from-amber-200 to-amber-500 font-display text-xl font-black leading-none text-ink-900 shadow-[0_0_12px_rgba(245,190,90,0.35)] transition-all hover:scale-110 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100 max-md:size-7 max-md:text-base"
-              >
-                +
-              </button>
-            </div>
-            <span className="font-display text-[10px] font-bold uppercase tracking-[0.3em] text-amber-300/90 max-md:text-[8px] max-md:tracking-[0.15em]">
-              Development <span className="text-parchment-300/70">({devCards.length})</span>
-              <span className="ml-1 normal-case tracking-normal text-parchment-300/60">{deckRemaining ?? '-'} left</span>
-            </span>
-          </div>
-        </section>
+      {/* Development cards */}
+      <div className="flex items-end" aria-label="Your development cards">
+        {devCards.length === 0 && <CardBack small label={deckRemaining != null ? `${deckRemaining} in deck` : 'None'} />}
+        {devCards.map((card, i) => (
+          <DevCardFace
+            key={card.id}
+            card={card}
+            onPlay={(c) => {
+              setSelectedKey(null);
+              onPlayDevCard(c);
+            }}
+            disabled={!canPlay}
+            index={i}
+            selected={selectedKey === `dev:${card.id}`}
+            onSelect={() => toggle(`dev:${card.id}`)}
+          />
+        ))}
+      </div>
+    </section>
   );
 }

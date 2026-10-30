@@ -46,19 +46,22 @@ export default function PhaseBanner({ game, currentPlayer, robberMover, isMyTurn
   return (
     <section
       aria-live="polite"
-      className={`rounded-xl border px-3 py-1.5 text-center shadow-2xl backdrop-blur-md ${
+      className={`pointer-events-none flex max-w-[min(90vw,34rem)] items-center gap-2 rounded-full border px-3.5 py-1 text-center shadow-2xl backdrop-blur-md max-md:gap-1.5 max-md:px-2.5 max-md:py-0.5 ${
         highlight
           ? 'animate-glow border-amber-300/70 bg-gradient-to-b from-amber-200/95 to-amber-400/95 text-ink-900'
-          : 'border-amber-700/50 bg-gray-900/80 text-parchment-100'
+          : 'border-amber-700/50 bg-gray-900/85 text-parchment-100'
       }`}
     >
-      <p className="font-display text-[10px] font-bold uppercase tracking-[0.3em] opacity-80">{title}</p>
-      <p className="mt-0.5 text-sm">
+      <span className="shrink-0 font-display text-[9px] font-bold uppercase tracking-[0.25em] opacity-75 max-md:text-[8px] max-md:tracking-[0.15em]">
+        {title}
+      </span>
+      <span className="h-3 w-px shrink-0 bg-current opacity-25" aria-hidden="true" />
+      <span className="truncate text-xs max-md:text-[11px]">
         <span className={`font-display font-bold ${highlight ? '' : colorClass}`}>
-          {isMyTurn ? 'You' : `${actor.name} (${seat(actor.color).label})`}
+          {isMyTurn ? 'You' : actor.name}
         </span>
-        {isMyTurn ? `, ${instruction}.` : `: waiting for them to ${instruction}.`}
-      </p>
+        {isMyTurn ? `, ${instruction}.` : `: waiting to ${instruction}.`}
+      </span>
     </section>
   );
 }

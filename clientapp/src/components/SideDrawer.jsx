@@ -3,11 +3,12 @@ import GameLog from './GameLog';
 import DiceStatsChart from './DiceStatsChart';
 import { seat } from '../theme';
 import { sound } from '../audio';
+import { ChartIcon, ChatIcon, ScrollIcon, SoundOffIcon, SoundOnIcon } from './icons';
 
 const TABS = [
-  { id: 'log', label: 'Game Log', glyph: '\u{1F4DC}' },
-  { id: 'chat', label: 'Chat', glyph: '\u{1F4AC}' },
-  { id: 'stats', label: 'Dice Stats', glyph: '\u{1F3B2}' },
+  { id: 'log', label: 'Game Log', icon: ScrollIcon },
+  { id: 'chat', label: 'Chat', icon: ChatIcon },
+  { id: 'stats', label: 'Dice Stats', icon: ChartIcon },
 ];
 
 function ChatPanel({ messages, players, myPlayerId, onSend, disabled }) {
@@ -64,8 +65,9 @@ function ChatPanel({ messages, players, myPlayerId, onSend, disabled }) {
 }
 
 /**
- * Floating action rail on the right edge plus a slide-out glass drawer. Badges light up
- * when a tab receives new content while it is not the open one.
+ * Floating action rail on the left edge plus a slide-out glass drawer (the right edge
+ * belongs to the action dock). Badges light up when a tab receives new content while it
+ * is not the open one.
  */
 export default function SideDrawer({ log, chatMessages, players, myPlayerId, onSendChat, frequencies, disabled }) {
   const [open, setOpen] = useState(null);
@@ -111,8 +113,8 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
       {/* Floating rail */}
       <nav
         aria-label="Side panels"
-        className={`fixed right-3 top-1/2 z-[60] flex -translate-y-1/2 flex-col gap-2 transition-transform duration-300 max-md:right-[max(0.375rem,env(safe-area-inset-right))] max-md:gap-1 ${
-          open ? '-translate-x-80' : ''
+        className={`pointer-events-none fixed left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-2 transition-transform duration-300 max-md:left-[max(0.375rem,env(safe-area-inset-left))] max-md:gap-1 ${
+          open ? 'translate-x-80 max-md:translate-x-64' : ''
         }`}
       >
         {TABS.map((tab) => {
@@ -126,13 +128,13 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
               title={tab.label}
               aria-label={tab.label}
               aria-pressed={active}
-              className={`relative flex size-12 items-center justify-center rounded-xl border text-xl shadow-xl backdrop-blur-md transition-all hover:scale-110 max-md:size-9 max-md:rounded-lg max-md:text-base ${
+              className={`pointer-events-auto relative flex size-12 items-center justify-center rounded-xl border shadow-xl backdrop-blur-md transition-all hover:scale-110 max-md:size-9 max-md:rounded-lg ${
                 active
                   ? 'border-amber-300 bg-amber-400/90 text-ink-900 shadow-amber-500/40'
                   : 'border-amber-700/50 bg-gray-900/85 text-parchment-100 hover:border-amber-400'
               }`}
             >
-              <span aria-hidden="true">{tab.glyph}</span>
+              <tab.icon className="size-5 max-md:size-4" />
               {unread && !active && (
                 <span className="absolute -right-1 -top-1 flex size-3.5">
                   <span className="absolute inline-flex size-full animate-ping rounded-full bg-rose-400 opacity-75" />
@@ -147,21 +149,21 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
           onClick={() => sound.toggleMuted()}
           title={muted ? 'Unmute sounds' : 'Mute sounds'}
           aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
-          className="flex size-12 items-center justify-center rounded-xl border border-amber-700/50 bg-gray-900/85 text-lg text-parchment-100 shadow-xl backdrop-blur-md transition-all hover:scale-110 hover:border-amber-400 max-md:size-9 max-md:rounded-lg max-md:text-sm"
+          className="pointer-events-auto flex size-12 items-center justify-center rounded-xl border border-amber-700/50 bg-gray-900/85 text-parchment-100 shadow-xl backdrop-blur-md transition-all hover:scale-110 hover:border-amber-400 max-md:size-9 max-md:rounded-lg"
         >
-          <span aria-hidden="true">{muted ? '\u{1F507}' : '\u{1F50A}'}</span>
+          {muted ? <SoundOffIcon className="size-5 max-md:size-4" /> : <SoundOnIcon className="size-5 max-md:size-4" />}
         </button>
       </nav>
 
       {/* Backdrop (click to close) */}
-      {open && <div className="fixed inset-0 z-40 bg-black/30" onClick={close} aria-hidden="true" />}
+      {open && <div className="fixed inset-0 z-[36] bg-black/30" onClick={close} aria-hidden="true" />}
 
       {/* Drawer */}
       <aside
         aria-label={TABS.find((t) => t.id === open)?.label ?? 'Side panel'}
         aria-hidden={!open}
-        className={`fixed right-0 top-0 z-50 flex h-[100dvh] w-80 max-w-[85vw] flex-col border-l border-amber-700/50 bg-gray-900/90 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pr-[max(1rem,env(safe-area-inset-right))] pt-[max(1rem,env(safe-area-inset-top))] shadow-2xl backdrop-blur-md transition-transform duration-300 ease-out max-md:w-64 max-md:p-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:pr-[max(0.75rem,env(safe-area-inset-right))] max-md:pt-[max(0.75rem,env(safe-area-inset-top))] ${
-          open ? 'translate-x-0' : 'translate-x-full'
+        className={`fixed left-0 top-0 z-[38] flex h-[100dvh] w-80 max-w-[85vw] flex-col border-r border-amber-700/50 bg-gray-900/90 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pt-[max(1rem,env(safe-area-inset-top))] shadow-2xl backdrop-blur-md transition-transform duration-300 ease-out max-md:w-64 max-md:p-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:pl-[max(0.75rem,env(safe-area-inset-left))] max-md:pt-[max(0.75rem,env(safe-area-inset-top))] ${
+          open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <div className="mb-3 flex items-center justify-between">

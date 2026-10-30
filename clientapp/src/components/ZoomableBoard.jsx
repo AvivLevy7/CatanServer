@@ -1,10 +1,11 @@
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 
 /**
- * Pinch-to-zoom / drag-to-pan viewport for the game board. Fills its parent and
- * starts at 1x so the whole island is visible; double-tap resets.
+ * Pinch-to-zoom / drag-to-pan viewport for the game board. It is the full-screen
+ * background of the game, so the island itself is inset (`padClass`) to keep it clear
+ * of the floating HUD while the draggable surface still covers the whole viewport.
  */
-export default function ZoomableBoard({ children }) {
+export default function ZoomableBoard({ children, padClass = '' }) {
   return (
     <TransformWrapper
       minScale={1}
@@ -21,7 +22,7 @@ export default function ZoomableBoard({ children }) {
         wrapperClass="!h-full !w-full"
         contentClass="!h-full !w-full flex items-center justify-center"
       >
-        {children}
+        <div className={`flex h-full w-full items-center justify-center ${padClass}`}>{children}</div>
       </TransformComponent>
     </TransformWrapper>
   );
