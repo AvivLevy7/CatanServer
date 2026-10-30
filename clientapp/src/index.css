@@ -95,6 +95,22 @@ body,
   right: env(safe-area-inset-right, 0px);
 }
 
+/* Warm sunset sky over faint rolling fields behind the board SVG. */
+@utility board-backdrop {
+  background-color: #3b1d2e;
+  background-image:
+    /* subtle field furrows */
+    repeating-linear-gradient(
+      -12deg,
+      rgba(255, 220, 150, 0.05) 0 2px,
+      transparent 2px 14px
+    ),
+    /* low sun glow */
+    radial-gradient(ellipse 70% 55% at 50% 100%, rgba(255, 196, 92, 0.55) 0%, rgba(232, 112, 60, 0.35) 35%, transparent 70%),
+    /* sunset sky */
+    linear-gradient(180deg, #2b1a3d 0%, #6b2c4a 30%, #c2563a 60%, #e89a4a 82%, #f3c76a 100%);
+}
+
 *,
 *::before,
 *::after {

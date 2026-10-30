@@ -499,17 +499,73 @@ internal static class BotBrain
                      && offer.ResourcesRequested.All(pair => hand.GetValueOrDefault(pair.Key) - pair.Value >= cost.GetValueOrDefault(pair.Key))
                      && Worth(offer.ResourcesOffered, hand, missing, receiving: true) > Worth(offer.ResourcesRequested, hand, missing, receiving: false);
 
-        return accept
-            ? new BotPlan(bot.Name, "accept trade", "accepts the trade", AiBotService.ThinkDelay, key, IsFallbackSafe: true, game =>
+        if (accept)
+        {
+            return new BotPlan(bot.Name, "accept trade", "accepts the trade", AiBotService.ThinkDelay, key, IsFallbackSafe: true, game =>
             {
                 var (_, newState) = game.AcceptTrade(bot.Id, offer.OfferId);
                 return new BotMoveResult(newState, null, null, new TradeResolvedDto(offer.OfferId, bot.Id, "Accepted"));
-            })
-            : new BotPlan(bot.Name, "reject trade", "declines the trade", AiBotService.ThinkDelay, key, IsFallbackSafe: true, game =>
-            {
-                var (_, removed, newState) = game.RejectTrade(bot.Id, offer.OfferId);
-                return new BotMoveResult(newState, null, null, new TradeResolvedDto(offer.OfferId, bot.Id, removed ? "Rejected" : "Declined"));
             });
+        }
+
+        // Counter once per turn: the original terms were not worth it but the proposer is
+        // offering something we are missing - ask for one of those in exchange for one surplus card.
+        var counter = CounterTerms(state, offer, hand, missing, cost);
+        if (counter is { } terms && LastCounterTurn.GetValueOrDefault((state.GameId, bot.Id), -1) != state.TurnNumber)
+        {
+            LastCounterTurn[(state.GameId, bot.Id)] = state.TurnNumber;
+            var (give, get) = terms;
+            var giveName = give.First().Key;
+            var getName = get.First().Key;
+            return new BotPlan(bot.Name, $"counter {giveName} for {getName}", $"counters: 1 {giveName} for 1 {getName}", AiBotService.ThinkDelay, key, IsFallbackSafe: true, game =>
+            {
+                var (newOffer, newState) = game.ProposeTrade(bot.Id, offer.SenderPlayerId, give, get);
+                return new BotMoveResult(newState, null, null, new TradeResolvedDto(offer.OfferId, bot.Id, "Countered")) { Offered = newOffer };
+            });
+        }
+
+        return new BotPlan(bot.Name, "reject trade", "declines the trade", AiBotService.ThinkDelay, key, IsFallbackSafe: true, game =>
+        {
+            var (_, removed, newState) = game.RejectTrade(bot.Id, offer.OfferId);
+            return new BotMoveResult(newState, null, null, new TradeResolvedDto(offer.OfferId, bot.Id, removed ? "Rejected" : "Declined"));
+        });
+    }
+
+    /// <summary>Remembers which turn each bot last countered on, so it does not haggle endlessly.</summary>
+    private static readonly ConcurrentDictionary<(Guid Game, Guid Bot), int> LastCounterTurn = new();
+
+    /// <summary>
+    /// A 1-for-1 counter: take a card the proposer offered that we are missing, give back a
+    /// card we hold beyond our next build's needs (never one they asked for and we need).
+    /// </summary>
+    private static (Dictionary<string, int> Give, Dictionary<string, int> Get)? CounterTerms(
+        GameStateDto state, TradeOfferDto offer,
+        IReadOnlyDictionary<string, int> hand, IReadOnlyDictionary<string, int> missing, IReadOnlyDictionary<string, int> cost)
+    {
+        if (offer.SenderPlayerId != state.CurrentTurnPlayerId)
+        {
+            // Never counter a counter: that is already the proposer's final word on our terms.
+            return null;
+        }
+
+        var want = offer.ResourcesOffered.Keys.FirstOrDefault(missing.ContainsKey);
+        if (want is null)
+        {
+            return null;
+        }
+
+        var spare = hand
+            .Where(pair => pair.Key != want && pair.Value - cost.GetValueOrDefault(pair.Key) > 0)
+            .OrderByDescending(pair => offer.ResourcesRequested.ContainsKey(pair.Key) ? 1 : 0)
+            .ThenByDescending(pair => pair.Value - cost.GetValueOrDefault(pair.Key))
+            .Select(pair => pair.Key)
+            .FirstOrDefault();
+        if (spare is null)
+        {
+            return null;
+        }
+
+        return (new Dictionary<string, int> { [spare] = 1 }, new Dictionary<string, int> { [want] = 1 });
     }
 
     /// <summary>

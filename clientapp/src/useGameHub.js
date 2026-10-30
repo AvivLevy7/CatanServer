@@ -47,6 +47,10 @@ export function useGameHub() {
   const [chatMessages, setChatMessages] = useState([]);
   const [isRolling, setIsRolling] = useState(false);
   const rollRevealRef = useRef(null);
+  // While the dice tumble, GameState updates are parked here and applied on reveal so
+  // nobody sees their resources change before the result is shown.
+  const rollingRef = useRef(false);
+  const deferredGameRef = useRef(null);
   // Most recent accept/decline/cancel so the proposer gets feedback.
   const [lastTradeResult, setLastTradeResult] = useState(null);
   const [status, setStatus] = useState('connecting');
@@ -80,21 +84,31 @@ export function useGameHub() {
     });
 
     connection.on(GAME_STATE_EVENT, (nextGame) => {
-      if (!cancelled) {
-        setGame(nextGame);
+      if (cancelled) return;
+      if (rollingRef.current) {
+        deferredGameRef.current = nextGame;
+        return;
       }
+      setGame(nextGame);
     });
 
     connection.on(DICE_ROLLED_EVENT, (roll) => {
       if (cancelled) return;
       // Tumble for a moment before revealing; App locks the controls while isRolling.
+      // The post-roll GameState (with the resource payout) is held back until the reveal.
       clearTimeout(rollRevealRef.current);
       sound.play('dice');
+      rollingRef.current = true;
       setIsRolling(true);
       rollRevealRef.current = setTimeout(() => {
         if (cancelled) return;
+        rollingRef.current = false;
         setLastRoll(roll);
         setIsRolling(false);
+        if (deferredGameRef.current) {
+          setGame(deferredGameRef.current);
+          deferredGameRef.current = null;
+        }
       }, DICE_ANIMATION_MS);
     });
 

@@ -97,14 +97,16 @@ function WaxSeal({ children, color }) {
  * While an offer is outstanding it shows its status and a withdraw button instead.
  */
 export default function PlayerTradePanel(props) {
-  // Remount the builder whenever the seat changes so its draft state resets.
-  return <TradeBuilder key={props.player?.id ?? 'none'} {...props} />;
+  // Remount the builder whenever the seat or the countered offer changes so its draft state resets.
+  return <TradeBuilder key={`${props.player?.id ?? 'none'}:${props.counterTo?.offer?.offerId ?? ''}`} {...props} />;
 }
 
-function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, onCancel, disabled }) {
-  const [giveDraft, setGive] = useState(EMPTY);
-  const [get, setGet] = useState(EMPTY);
-  const [target, setTarget] = useState('');
+function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, onCancel, disabled, counterTo = null }) {
+  // Countering flips the original: what they asked of us becomes our "give", what they offered our "get".
+  const seed = counterTo?.offer;
+  const [giveDraft, setGive] = useState(() => ({ ...EMPTY, ...(seed?.resourcesRequested ?? {}) }));
+  const [get, setGet] = useState(() => ({ ...EMPTY, ...(seed?.resourcesOffered ?? {}) }));
+  const [target, setTarget] = useState(seed?.senderPlayerId ?? '');
 
   const resources = player?.resources ?? {};
   const give = Object.fromEntries(
@@ -113,8 +115,9 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
 
   const giveKeys = new Set(RESOURCES.filter(({ key }) => give[key] > 0).map(({ key }) => key));
   const getKeys = new Set(RESOURCES.filter(({ key }) => get[key] > 0).map(({ key }) => key));
-  const isValidOffer = giveKeys.size > 0 && getKeys.size > 0;
-  const canSend = !disabled && isValidOffer && !activeOffer;
+  // Asymmetric trades are allowed (a gift or a plain request) - just not an empty decree.
+  const isValidOffer = giveKeys.size > 0 || getKeys.size > 0;
+  const canSend = !disabled && isValidOffer && (!activeOffer || !!counterTo);
 
   const mine = activeOffer && activeOffer.senderPlayerId === player?.id;
   const targetName = (id) => opponents.find((o) => o.id === id)?.name ?? 'Anyone';
@@ -125,8 +128,17 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
       <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-sm ring-1 ring-inset ring-amber-900/30" />
 
       <header className="mb-5 text-center">
-        <p className="font-display text-[10px] uppercase tracking-[0.5em] text-amber-900/70">A Decree of Commerce</p>
-        <h2 className="font-display text-2xl font-black tracking-wide text-ink-800">Trade with Players</h2>
+        <p className="font-display text-[10px] uppercase tracking-[0.5em] text-amber-900/70">
+          {counterTo ? 'A Counter-Proposal' : 'A Decree of Commerce'}
+        </p>
+        <h2 className="font-display text-2xl font-black tracking-wide text-ink-800">
+          {counterTo ? `Counter ${counterTo.senderName}'s offer` : 'Trade with Players'}
+        </h2>
+        {counterTo && (
+          <p className="mt-1 text-xs italic text-ink-800/70">
+            Their terms are filled in below - adjust them and send the decree back.
+          </p>
+        )}
         <div className="mx-auto mt-2 h-px w-40 bg-gradient-to-r from-transparent via-amber-900/60 to-transparent" />
       </header>
 
@@ -156,7 +168,7 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
           <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[1fr_auto_1fr]">
             <BundleColumn
               title="I Offer"
-              subtitle="from my own stores"
+              subtitle={getKeys.size === 0 && giveKeys.size > 0 ? 'as a gift' : 'from my own stores'}
               side="give"
               bundle={give}
               setBundle={setGive}
@@ -169,7 +181,7 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
             </div>
             <BundleColumn
               title="In Return"
-              subtitle="I ask for"
+              subtitle={giveKeys.size === 0 && getKeys.size > 0 ? 'a plain request' : 'I ask for (may be nothing)'}
               side="get"
               bundle={get}
               setBundle={setGet}
@@ -181,24 +193,26 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
           <div className="mt-6 flex flex-col items-center gap-3">
             <p className="font-display text-[10px] uppercase tracking-[0.3em] text-amber-900/70">Addressed to</p>
             <div className="flex flex-wrap justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setTarget('')}
-                disabled={disabled}
-                className={`flex items-center gap-2 rounded-full border px-3 py-1 font-display text-xs font-bold transition-all hover:scale-105 ${
-                  target === ''
-                    ? 'border-amber-900 bg-ink-800 text-parchment-50 shadow'
-                    : 'border-amber-900/40 bg-white/30 text-ink-800 hover:bg-white/60'
-                }`}
-              >
-                <span className="text-base leading-none">&#9733;</span> Anyone
-              </button>
-              {opponents.map((o) => (
+              {!counterTo && (
+                <button
+                  type="button"
+                  onClick={() => setTarget('')}
+                  disabled={disabled}
+                  className={`flex items-center gap-2 rounded-full border px-3 py-1 font-display text-xs font-bold transition-all hover:scale-105 ${
+                    target === ''
+                      ? 'border-amber-900 bg-ink-800 text-parchment-50 shadow'
+                      : 'border-amber-900/40 bg-white/30 text-ink-800 hover:bg-white/60'
+                  }`}
+                >
+                  <span className="text-base leading-none">&#9733;</span> Anyone
+                </button>
+              )}
+              {opponents.filter((o) => !counterTo || o.id === counterTo.offer.senderPlayerId).map((o) => (
                 <button
                   key={o.id}
                   type="button"
                   onClick={() => setTarget(o.id)}
-                  disabled={disabled}
+                  disabled={disabled || !!counterTo}
                   className={`flex items-center gap-2 rounded-full border py-1 pl-1 pr-3 font-display text-xs font-bold transition-all hover:scale-105 ${
                     target === o.id
                       ? 'border-amber-900 bg-ink-800 text-parchment-50 shadow'
@@ -226,7 +240,7 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
 
           {!isValidOffer && !disabled && (
             <p className="mt-4 text-center text-xs italic text-ink-800/60">
-              Choose at least one card to offer and one to ask for.
+              Choose at least one card to offer or to ask for.
             </p>
           )}
 
@@ -237,7 +251,7 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
               disabled={!canSend}
               className="rounded-md bg-gradient-to-b from-seat-red to-rose-950 px-8 py-2.5 font-display text-sm font-black uppercase tracking-[0.25em] text-parchment-50 shadow-[0_6px_18px_rgba(139,30,45,0.5)] ring-1 ring-rose-300/40 transition-all hover:scale-105 hover:shadow-[0_8px_26px_rgba(139,30,45,0.7)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
             >
-              Seal &amp; Send
+              {counterTo ? 'Send Counter-Offer' : 'Seal & Send'}
             </button>
           </div>
         </>

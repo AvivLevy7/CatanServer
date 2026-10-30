@@ -15,6 +15,9 @@ const DEV_META = {
 const CARD_BASE =
   'relative flex h-16 w-12 shrink-0 select-none flex-col items-center justify-between rounded-lg border border-amber-200/60 bg-gradient-to-b p-1 text-center shadow-[0_4px_10px_rgba(0,0,0,0.6)] ring-1 transition-transform duration-200 ease-out [@media(hover:hover)]:hover:-translate-y-2 [@media(hover:hover)]:hover:z-10 [@media(hover:hover)]:hover:scale-105 data-[selected=true]:z-10 data-[selected=true]:-translate-y-2 data-[selected=true]:scale-105 data-[selected=true]:ring-2 data-[selected=true]:ring-amber-200 max-md:h-12 max-md:w-9 max-md:p-0.5';
 
+// Development cards render a notch smaller than resources so the resource hand stays the focal point.
+const DEV_SIZE = 'h-14 w-[42px] max-md:h-10 max-md:w-8';
+
 function CardFrame({ children, className = '', ...rest }) {
   return (
     <div className={`${CARD_BASE} ${className}`} {...rest}>
@@ -77,7 +80,7 @@ function DevCardFace({ card, onPlay, disabled, index, selected, onSelect }) {
 
   return (
     <CardFrame
-      className={`${meta.face} text-parchment-50 ${index > 0 ? '-ml-3 max-md:-ml-2' : ''} ${playable ? 'animate-glow cursor-pointer' : 'cursor-pointer'} ${
+      className={`${meta.face} ${DEV_SIZE} text-parchment-50 ${index > 0 ? '-ml-3 max-md:-ml-2' : ''} ${playable ? 'animate-glow cursor-pointer' : 'cursor-pointer'} ${
         !playable && !isVp ? 'opacity-60 saturate-50' : ''
       }`}
       style={{ zIndex: index }}
@@ -106,9 +109,9 @@ function DevCardFace({ card, onPlay, disabled, index, selected, onSelect }) {
   );
 }
 
-function CardBack({ label }) {
+function CardBack({ label, small = false }) {
   return (
-    <CardFrame className="cursor-default from-ink-800 to-ink-900 opacity-80 ring-amber-700/50">
+    <CardFrame className={`cursor-default from-ink-800 to-ink-900 opacity-80 ring-amber-700/50 ${small ? DEV_SIZE : ''}`}>
       <span className="pointer-events-none absolute inset-2 rounded-lg border border-amber-600/30 bg-[repeating-linear-gradient(45deg,rgba(245,190,90,0.08)_0_6px,transparent_6px_12px)]" aria-hidden="true" />
       <span className="relative mb-auto mt-auto font-display text-lg font-black text-amber-400/70">C</span>
       <span className="relative font-display text-[7px] uppercase tracking-widest text-parchment-300">{label}</span>
@@ -121,7 +124,7 @@ function CardBack({ label }) {
  * development cards (right), separated by a gold rule. Only ever receives the viewer's
  * PlayerDto - the only one the server sends with resources/developmentCards populated.
  */
-export default function CardHand({ player, onPlayDevCard, onBuyDevCard, canBuy, canPlay, deckRemaining }) {
+export default function CardHand({ player, onPlayDevCard, onBuyDevCard, canBuy, canPlay, deckRemaining, tradeSlot = null }) {
   // Which card is raised; a string key so resources and dev cards share one slot.
   const [selectedKey, setSelectedKey] = useState(null);
   const toggle = (key) => setSelectedKey((current) => (current === key ? null : key));
@@ -132,13 +135,27 @@ export default function CardHand({ player, onPlayDevCard, onBuyDevCard, canBuy, 
   const canAfford = (resources.Ore ?? 0) >= 1 && (resources.Grain ?? 0) >= 1 && (resources.Wool ?? 0) >= 1;
   const owned = RESOURCES.filter(({ key }) => (resources[key] ?? 0) > 0);
 
+  const buyDisabled = !canBuy || !canAfford || deckRemaining === 0;
+  const buyTitle = deckRemaining === 0
+    ? 'The development deck is empty'
+    : !canBuy
+      ? 'Roll the dice before buying'
+      : !canAfford
+        ? 'Needs Ore + Wheat + Sheep'
+        : `Buy a development card (Ore + Wheat + Sheep) \u2014 ${deckRemaining ?? '-'} left`;
+
   return (
     <section
       aria-label="Your hand"
-      className="panel-glass flex items-end justify-center gap-3 overflow-visible px-3 pb-1 pt-3 max-md:gap-2 max-md:px-2 max-md:pb-0.5 max-md:pt-2"
+      className="panel-glass grid grid-cols-[auto_1fr_auto] items-end gap-3 overflow-visible px-3 pb-1 pt-3 max-md:gap-1.5 max-md:px-2 max-md:pb-0.5 max-md:pt-2"
     >
-      {/* Resources */}
-      <div className="flex flex-col items-center gap-1 max-md:gap-0.5">
+      {/* Left: trade */}
+      <div className="flex w-36 flex-none flex-col justify-end self-center max-md:w-24" aria-label="Actions">
+        {tradeSlot}
+      </div>
+
+      {/* Centre: resources */}
+      <div className="flex min-w-0 flex-col items-center gap-1 overflow-x-auto overflow-y-visible max-md:gap-0.5">
         <div className="flex items-end">
           {total === 0 && <CardBack label="Empty" />}
           {owned.map(({ key }, i) => (
@@ -157,13 +174,10 @@ export default function CardHand({ player, onPlayDevCard, onBuyDevCard, canBuy, 
         </span>
       </div>
 
-      {/* Divider */}
-      <div className="h-14 w-px self-center bg-gradient-to-b from-transparent via-amber-500/60 to-transparent max-md:h-10" aria-hidden="true" />
-
-      {/* Development cards */}
-      <div className="flex flex-col items-center gap-1">
-        <div className="flex items-end">
-          {devCards.length === 0 && <CardBack label={deckRemaining != null ? `${deckRemaining} in deck` : 'None'} />}
+      {/* Right: development cards + buy */}
+      <div className="flex flex-none flex-col items-center gap-1">
+        <div className="flex items-end gap-2 max-md:gap-1">
+          {devCards.length === 0 && <CardBack small label={deckRemaining != null ? `${deckRemaining} in deck` : 'None'} />}
           {devCards.map((card, i) => (
             <DevCardFace
               key={card.id}
@@ -178,20 +192,22 @@ export default function CardHand({ player, onPlayDevCard, onBuyDevCard, canBuy, 
               onSelect={() => toggle(`dev:${card.id}`)}
             />
           ))}
-        </div>
-        <span className="flex items-center gap-3 font-display text-[10px] font-bold uppercase tracking-[0.3em] text-amber-300/90 max-md:gap-1.5 max-md:text-[8px] max-md:tracking-[0.15em]">
-          Development <span className="text-parchment-300/70">({devCards.length})</span>
-          <button
-            type="button"
-            onClick={onBuyDevCard}
-            disabled={!canBuy || !canAfford || deckRemaining === 0}
-            title={!canBuy ? 'Roll the dice before buying' : 'Ore + Wheat + Sheep'}
-            className="rounded-md bg-gradient-to-b from-amber-200 to-amber-400 px-2 py-0.5 font-display text-[10px] font-bold tracking-wide text-ink-900 shadow transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
-          >
-            Buy ({deckRemaining ?? '-'} left)
-          </button>
-        </span>
-      </div>
-    </section>
+              <button
+                type="button"
+                onClick={onBuyDevCard}
+                disabled={buyDisabled}
+                title={buyTitle}
+                aria-label="Buy development card"
+                className="mb-1 flex size-9 shrink-0 items-center justify-center rounded-full border border-amber-100/70 bg-gradient-to-b from-amber-200 to-amber-500 font-display text-xl font-black leading-none text-ink-900 shadow-[0_0_12px_rgba(245,190,90,0.35)] transition-all hover:scale-110 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100 max-md:size-7 max-md:text-base"
+              >
+                +
+              </button>
+            </div>
+            <span className="font-display text-[10px] font-bold uppercase tracking-[0.3em] text-amber-300/90 max-md:text-[8px] max-md:tracking-[0.15em]">
+              Development <span className="text-parchment-300/70">({devCards.length})</span>
+              <span className="ml-1 normal-case tracking-normal text-parchment-300/60">{deckRemaining ?? '-'} left</span>
+            </span>
+          </div>
+        </section>
   );
 }

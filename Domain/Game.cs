@@ -497,8 +497,11 @@ public sealed class Game
     };
 
     /// <summary>
-    /// Current player proposes a trade to one opponent or to everyone. Only one offer
-    /// can be outstanding at a time; proposing again replaces the previous one.
+    /// Proposes a trade. The current player may address one opponent or everyone. An opponent
+    /// may also propose, but only as a <em>counter-offer</em>: they must be a recipient of the
+    /// outstanding offer and their proposal is addressed back to the current player. Either
+    /// side of the bundle may be empty (gifts and requests are allowed) but not both. Only one
+    /// offer can be outstanding at a time; proposing again replaces the previous one.
     /// </summary>
     public TradeOffer ProposeTrade(
         Guid senderId,
@@ -507,15 +510,34 @@ public sealed class Game
         IReadOnlyDictionary<ResourceType, int> requested)
     {
         RequireMainGame();
-        RequireTurn(senderId);
-        RequireRolled();
+
+        var isCurrentPlayer = senderId == CurrentTurnPlayerId;
+        if (isCurrentPlayer)
+        {
+            RequireRolled();
+        }
+        else
+        {
+            // Counter-offer: only someone the live offer is addressed to, and only back to the proposer.
+            if (ActiveTradeOffer is not { } live || !live.IsAddressedTo(senderId))
+            {
+                throw new GameRuleException("You can only counter an offer that was made to you.");
+            }
+
+            if (targetId is not null && targetId != live.SenderPlayerId)
+            {
+                throw new GameRuleException("A counter-offer must be addressed to the player who made the offer.");
+            }
+
+            targetId = live.SenderPlayerId;
+        }
 
         var give = Normalise(offered);
         var get = Normalise(requested);
 
-        if (give.Count == 0 || get.Count == 0)
+        if (give.Count == 0 && get.Count == 0)
         {
-            throw new GameRuleException("A trade must offer at least one resource and request at least one resource.");
+            throw new GameRuleException("A trade must include at least one resource.");
         }
 
         if (give.Keys.Intersect(get.Keys).Any())

@@ -37,7 +37,7 @@ function BundleCards({ bundle, emptyText }) {
  * Shown to each recipient of a pending offer as a sealed parchment letter with
  * exactly what the sender gives and wants, plus Accept / Reject.
  */
-export default function TradeOfferModal({ offer, sender, recipient, onAccept, onReject, disabled }) {
+export default function TradeOfferModal({ offer, sender, recipient, onAccept, onReject, onCounter, disabled }) {
   const affordable = canAfford(recipient, offer.resourcesRequested);
   const s = seat(sender?.color);
 
@@ -91,20 +91,30 @@ export default function TradeOfferModal({ offer, sender, recipient, onAccept, on
           </p>
         )}
 
-        <div className="mt-7 grid grid-cols-2 gap-3">
+        <div className={`mt-7 grid gap-3 ${onCounter ? 'grid-cols-3 max-sm:grid-cols-2' : 'grid-cols-2'}`}>
           <button
             type="button"
             onClick={() => onReject(offer.offerId)}
             disabled={disabled}
-            className="rounded-md border-2 border-ink-800/60 bg-white/30 px-3 py-2.5 font-display text-sm font-black uppercase tracking-[0.2em] text-ink-800 transition-all hover:scale-105 hover:bg-white/60 disabled:opacity-50 disabled:hover:scale-100"
+            className="rounded-md border-2 border-ink-800/60 bg-white/30 px-3 py-2.5 font-display text-sm font-black uppercase tracking-[0.2em] text-ink-800 transition-all hover:scale-105 hover:bg-white/60 disabled:opacity-50 disabled:hover:scale-100 max-sm:text-xs"
           >
             Refuse
           </button>
+          {onCounter && (
+            <button
+              type="button"
+              onClick={onCounter}
+              disabled={disabled}
+              className="rounded-md border-2 border-amber-800/60 bg-gradient-to-b from-amber-100 to-amber-300 px-3 py-2.5 font-display text-sm font-black uppercase tracking-[0.2em] text-ink-900 shadow transition-all hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 max-sm:order-last max-sm:col-span-2 max-sm:text-xs"
+            >
+              Counter-Offer
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onAccept(offer.offerId)}
             disabled={disabled || !affordable}
-            className="rounded-md bg-gradient-to-b from-emerald-600 to-emerald-900 px-3 py-2.5 font-display text-sm font-black uppercase tracking-[0.2em] text-parchment-50 shadow-[0_6px_18px_rgba(20,105,74,0.5)] ring-1 ring-emerald-300/40 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
+            className="rounded-md bg-gradient-to-b from-emerald-600 to-emerald-900 px-3 py-2.5 font-display text-sm font-black uppercase tracking-[0.2em] text-parchment-50 shadow-[0_6px_18px_rgba(20,105,74,0.5)] ring-1 ring-emerald-300/40 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100 max-sm:text-xs"
           >
             Accept
           </button>

@@ -115,6 +115,8 @@ export default function App() {
   const [pendingCard, setPendingCard] = useState(null);
   // Turn number the trade desk was opened on; it closes itself when the turn moves on.
   const [tradeOpenTurn, setTradeOpenTurn] = useState(null);
+  // Offer the viewer chose to counter: the trade desk opens pre-filled with it (as recipient).
+  const [counterOf, setCounterOf] = useState(null);
 
   // Browsers gate audio behind a user gesture: unlock on the first one.
   useEffect(() => {
@@ -151,6 +153,7 @@ export default function App() {
     if (outcome === 'Accepted') appendLog(`Trade accepted by ${nameOf(byPlayerId)}.`, 'good');
     else if (outcome === 'Rejected') appendLog('Trade offer declined.', 'bad');
     else if (outcome === 'Cancelled') appendLog('Trade offer withdrawn.');
+    else if (outcome === 'Countered') appendLog(`${nameOf(byPlayerId)} made a counter-offer.`, 'info');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastTradeResult]);
 
@@ -418,7 +421,7 @@ export default function App() {
       <div className="flex min-h-0 w-full flex-1 gap-1 px-1 pr-14 pt-0.5 max-md:px-0.5 max-md:pr-12 max-md:pt-0">
         <section
           aria-label="Board"
-          className="flex min-h-0 min-w-0 w-full flex-1 touch-none items-center justify-center overflow-hidden rounded-2xl border border-amber-800/40 bg-gradient-to-b from-sky-950/70 to-ink-900/70 p-1 shadow-2xl shadow-black/60 backdrop-blur-sm max-md:rounded-lg max-md:p-0"
+          className="board-backdrop flex min-h-0 min-w-0 w-full flex-1 touch-none items-center justify-center overflow-hidden rounded-2xl border border-amber-800/40 p-1 shadow-2xl shadow-black/60 max-md:rounded-lg max-md:p-0"
         >
           <ZoomableBoard>
             <Board
@@ -466,46 +469,43 @@ export default function App() {
         </aside>
       </div>
 
-      {/* ---- Bottom: action bar + card hand (flex-none) ---- */}
-      <div className="flex w-full flex-none items-end gap-1 px-1 pb-1 pr-14 pt-0.5 max-md:gap-0.5 max-md:px-0.5 max-md:pb-0.5 max-md:pr-12 max-md:pt-0">
-        {/* Action bar */}
-        <section aria-label="Actions" className="panel-glass flex w-36 flex-none flex-col items-stretch gap-1 p-1.5 max-md:w-28 max-md:p-1">
-          <button
-            type="button"
-            onClick={() => setTradeOpenTurn(game?.turnNumber ?? 0)}
-            disabled={!canBuild}
-            title={!isMainGame ? 'Trading opens in the main game' : !isMyTurn ? 'Wait for your turn' : !hasRolled ? 'Roll the dice first' : 'Trade with players, the bank or your ports'}
-            className="group relative overflow-hidden rounded-md border border-amber-300/60 bg-gradient-to-b from-amber-200 via-amber-400 to-amber-600 px-3 py-1 font-display text-xs font-black uppercase tracking-[0.25em] text-ink-900 shadow-[0_0_14px_rgba(245,190,90,0.35)] ring-1 ring-amber-100/70 transition-all hover:brightness-110 hover:shadow-[0_0_22px_rgba(245,190,90,0.6)] disabled:cursor-not-allowed disabled:opacity-40 max-md:px-2 max-md:py-0.5 max-md:text-[10px] max-md:tracking-[0.15em]"
-          >
-            <span className="relative z-10">Trade</span>
-            <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
-          </button>
-          <p className="truncate text-center text-[10px] italic leading-snug text-parchment-300/80 max-md:hidden">
-            {activeOffer && activeOffer.senderPlayerId === myPlayerId
-              ? 'Your offer is on the table.'
-              : isMainGame && isMyTurn
-                ? hasRolled
-                  ? 'Click the board to build.'
-                  : 'Roll the dice to begin.'
-                : isMainGame
-                  ? `Waiting for ${currentPlayer?.name ?? 'the current player'}.`
-                  : 'Setup phase: place your pieces.'}
-          </p>
-        </section>
-
-        {/* Hand */}
-        <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
-          {me && (
-            <CardHand
-              player={me}
-              onPlayDevCard={handlePlayCard}
-              onBuyDevCard={buyDevelopmentCard}
-              canBuy={canBuild}
-              canPlay={canAct && isMainGame}
-              deckRemaining={game?.developmentCardsRemaining}
-            />
-          )}
-        </div>
+      {/* ---- Bottom: Trade (left) | resources (centre) | dev cards + buy (right) ---- */}
+      <div className="w-full flex-none px-1 pb-1 pr-14 pt-0.5 max-md:px-0.5 max-md:pb-0.5 max-md:pr-12 max-md:pt-0">
+        {me && (
+          <CardHand
+            player={me}
+            onPlayDevCard={handlePlayCard}
+            onBuyDevCard={buyDevelopmentCard}
+            canBuy={canBuild}
+            canPlay={canAct && isMainGame}
+            deckRemaining={game?.developmentCardsRemaining}
+            tradeSlot={
+              <div className="flex flex-col items-stretch gap-1">
+                <button
+                  type="button"
+                  onClick={() => setTradeOpenTurn(game?.turnNumber ?? 0)}
+                  disabled={!canBuild}
+                  title={!isMainGame ? 'Trading opens in the main game' : !isMyTurn ? 'Wait for your turn' : !hasRolled ? 'Roll the dice first' : 'Trade with players, the bank or your ports'}
+                  className="group relative overflow-hidden rounded-md border border-amber-300/60 bg-gradient-to-b from-amber-200 via-amber-400 to-amber-600 px-3 py-1 font-display text-xs font-black uppercase tracking-[0.25em] text-ink-900 shadow-[0_0_14px_rgba(245,190,90,0.35)] ring-1 ring-amber-100/70 transition-all hover:brightness-110 hover:shadow-[0_0_22px_rgba(245,190,90,0.6)] disabled:cursor-not-allowed disabled:opacity-40 max-md:px-2 max-md:py-0.5 max-md:text-[10px] max-md:tracking-[0.15em]"
+                >
+                  <span className="relative z-10">Trade</span>
+                  <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
+                </button>
+                <p className="truncate text-center text-[10px] italic leading-snug text-parchment-300/80 max-md:hidden">
+                  {activeOffer && activeOffer.senderPlayerId === myPlayerId
+                    ? 'Your offer is on the table.'
+                    : isMainGame && isMyTurn
+                      ? hasRolled
+                        ? 'Click the board to build.'
+                        : 'Tap the dice to roll.'
+                      : isMainGame
+                        ? `Waiting for ${currentPlayer?.name ?? 'the current player'}.`
+                        : 'Setup phase: place your pieces.'}
+                </p>
+              </div>
+            }
+          />
+        )}
       </div>
 
       <SideDrawer
@@ -532,6 +532,28 @@ export default function App() {
         />
       )}
 
+      {/* Counter-offer desk: a recipient re-drafts the live offer back to its proposer. */}
+      {counterOf && activeOffer && counterOf.offerId === activeOffer.offerId && iAmOfferRecipient && me && (
+        <TradeModal
+          onClose={() => setCounterOf(null)}
+          player={me}
+          opponents={opponents}
+          activeOffer={null}
+          lastResult={null}
+          onPropose={(target, give, get) => {
+            setCounterOf(null);
+            proposeTrade(activeOffer.senderPlayerId, give, get);
+          }}
+          onCancel={cancelTrade}
+          onBankTrade={tradeWithBank}
+          disabled={!isLive}
+          counterTo={{
+            offer: activeOffer,
+            senderName: offerSender?.name ?? 'the proposer',
+          }}
+        />
+      )}
+
       {isDiscarding && me && myDiscard != null && (
         <DiscardModal
           player={me}
@@ -541,13 +563,14 @@ export default function App() {
         />
       )}
 
-      {isMainGame && activeOffer && iAmOfferRecipient && me && (
+      {isMainGame && activeOffer && iAmOfferRecipient && me && !(counterOf && counterOf.offerId === activeOffer.offerId) && (
         <TradeOfferModal
           offer={activeOffer}
           sender={offerSender}
           recipient={me}
           onAccept={acceptTrade}
           onReject={rejectTrade}
+          onCounter={() => setCounterOf(activeOffer)}
           disabled={!isLive}
         />
       )}

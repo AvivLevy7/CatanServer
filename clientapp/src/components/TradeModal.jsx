@@ -23,8 +23,10 @@ export default function TradeModal({
   onCancel,
   onBankTrade,
   disabled,
+  counterTo = null,
 }) {
   const [tab, setTab] = useState('players');
+  const tabs = counterTo ? TABS.filter((t) => t.id === 'players') : TABS;
 
   useEffect(() => {
     const onKey = (e) => {
@@ -52,7 +54,7 @@ export default function TradeModal({
         {/* Header + tabs */}
         <div className="flex flex-none items-center justify-between gap-3 border-b border-amber-800/40 px-4 pt-3">
           <div role="tablist" aria-label="Trade type" className="flex gap-1">
-            {TABS.map((t) => {
+            {tabs.map((t) => {
               const active = tab === t.id;
               return (
                 <button
@@ -98,6 +100,7 @@ export default function TradeModal({
               onPropose={onPropose}
               onCancel={onCancel}
               disabled={disabled}
+              counterTo={counterTo}
             />
           ) : (
             <TradePanel player={player} onTrade={onBankTrade} disabled={disabled} />
