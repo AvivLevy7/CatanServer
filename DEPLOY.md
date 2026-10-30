@@ -4,7 +4,7 @@ Two independently deployable pieces:
 
 | Piece | Path | Image | Config |
 |---|---|---|---|
-| Backend (ASP.NET Core 9 + SignalR) | `/` | `Dockerfile` | `ALLOWED_ORIGINS`, `PORT` |
+| Backend (ASP.NET Core 10 + SignalR) | `/` | `Dockerfile` | `ALLOWED_ORIGINS`, `PORT` |
 | Frontend (React/Vite, served by Nginx) | `/clientapp` | `clientapp/Dockerfile` | `VITE_API_URL` (build-time) |
 
 ## 1. Backend

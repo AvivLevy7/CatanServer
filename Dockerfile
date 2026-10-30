@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 # ---------------------------------------------------------------------------
-# CatanServer - ASP.NET Core 9 SignalR backend
+# CatanServer - ASP.NET Core 10 SignalR backend
 #
 #   docker build -t catan-server .
 #   docker run -p 8080:8080 -e ALLOWED_ORIGINS=https://your-frontend.example.com catan-server
 # ---------------------------------------------------------------------------
 
 # ---- Build stage -----------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Restore first so the NuGet layer is cached between source-only changes.
@@ -25,7 +25,7 @@ RUN dotnet publish CatanServer.csproj \
     /p:UseAppHost=false
 
 # ---- Runtime stage ---------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 # Render/Railway inject PORT; default to 8080 for Azure Container Apps and local runs.
