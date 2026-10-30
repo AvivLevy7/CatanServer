@@ -51,7 +51,7 @@ app.Services.GetRequiredService<AiBotService>();
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+   app.MapOpenApi();
 }
 
 // Behind a PaaS reverse proxy (Render/Railway/Azure) TLS terminates at the edge and the
