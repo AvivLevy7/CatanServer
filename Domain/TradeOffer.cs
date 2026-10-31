@@ -36,6 +36,12 @@ public sealed class TradeOffer
 
     public bool IsOpen => TargetPlayerId is null;
 
+    /// <summary>
+    /// One of the two bundles is empty. Such an offer is a legal opening gambit, but it cannot
+    /// be accepted as it stands: giving cards away for nothing is not a trade.
+    /// </summary>
+    public bool IsOneSided => ResourcesOffered.Count == 0 || ResourcesRequested.Count == 0;
+
     public bool IsAddressedTo(Guid playerId) =>
         playerId != SenderPlayerId && (IsOpen || TargetPlayerId == playerId);
 

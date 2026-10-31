@@ -277,9 +277,23 @@ export function useGameHub() {
     }
   }, []);
 
-  const buildSettlement = useCallback((nodeId) => invokeMove('BuildSettlement', nodeId), [invokeMove]);
-  const buildRoad = useCallback((edgeId) => invokeMove('BuildRoad', edgeId), [invokeMove]);
-  const buildCity = useCallback((nodeId) => invokeMove('BuildCity', nodeId), [invokeMove]);
+  // Placements get their own cue, played only once the server has accepted the move so a
+  // rejected click stays silent.
+  const invokeBuild = useCallback(
+    async (method, cue, ...args) => {
+      const placed = await invokeMove(method, ...args);
+      if (placed) sound.play(cue);
+      return placed;
+    },
+    [invokeMove],
+  );
+
+  const buildSettlement = useCallback(
+    (nodeId) => invokeBuild('BuildSettlement', 'settlement', nodeId),
+    [invokeBuild],
+  );
+  const buildRoad = useCallback((edgeId) => invokeBuild('BuildRoad', 'road', edgeId), [invokeBuild]);
+  const buildCity = useCallback((nodeId) => invokeBuild('BuildCity', 'city', nodeId), [invokeBuild]);
   const tradeWithBank = useCallback(
     (give, receive) => invokeMove('TradeWithBank', give, receive),
     [invokeMove],
@@ -325,10 +339,13 @@ export function useGameHub() {
     }
   }, []);
   const placeInitialSettlement = useCallback(
-    (nodeId) => invokeMove('PlaceInitialSettlement', nodeId),
-    [invokeMove],
+    (nodeId) => invokeBuild('PlaceInitialSettlement', 'settlement', nodeId),
+    [invokeBuild],
   );
-  const placeInitialRoad = useCallback((edgeId) => invokeMove('PlaceInitialRoad', edgeId), [invokeMove]);
+  const placeInitialRoad = useCallback(
+    (edgeId) => invokeBuild('PlaceInitialRoad', 'road', edgeId),
+    [invokeBuild],
+  );
 
   // Lobby. Create/Join return { roomId, playerId, room }; we remember our seat.
   const enterRoom = useCallback(async (method, ...args) => {

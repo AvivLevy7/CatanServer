@@ -5,6 +5,10 @@ function canAfford(player, bundle) {
   return Object.entries(bundle ?? {}).every(([key, amount]) => (player?.resources?.[key] ?? 0) >= amount);
 }
 
+function bundleSize(bundle) {
+  return RESOURCES.reduce((total, { key }) => total + (bundle?.[key] ?? 0), 0);
+}
+
 /** Static stack of resource cards for a bundle. */
 function BundleCards({ bundle, emptyText }) {
   const items = RESOURCES.filter(({ key }) => (bundle?.[key] ?? 0) > 0);
@@ -36,9 +40,15 @@ function BundleCards({ bundle, emptyText }) {
 /**
  * Shown to each recipient of a pending offer as a sealed parchment letter with
  * exactly what the sender gives and wants, plus Accept / Reject.
+ *
+ * A one-sided offer (one of the bundles empty) opens a negotiation but is not a legal
+ * trade, so Accept is withheld: the recipient may only counter it or refuse.
  */
 export default function TradeOfferModal({ offer, sender, recipient, onAccept, onReject, onCounter, disabled }) {
   const affordable = canAfford(recipient, offer.resourcesRequested);
+  const oneSided = bundleSize(offer.resourcesOffered) === 0 || bundleSize(offer.resourcesRequested) === 0;
+  const canAccept = !oneSided;
+  const columns = 1 + (onCounter ? 1 : 0) + (canAccept ? 1 : 0);
   const s = seat(sender?.color);
 
   return (
@@ -85,13 +95,24 @@ export default function TradeOfferModal({ offer, sender, recipient, onAccept, on
           </div>
         </div>
 
-        {!affordable && (
-          <p className="mt-5 rounded border border-rose-900/40 bg-rose-100/60 px-3 py-1.5 text-center text-xs font-semibold text-rose-900">
-            Your stores lack the requested goods.
+        {oneSided ? (
+          <p className="mt-5 rounded border border-amber-900/40 bg-amber-100/60 px-3 py-1.5 text-center text-xs font-semibold text-amber-950">
+            Only one side of this bargain is filled in, so it cannot be accepted as it stands.
+            {onCounter ? ' Counter it with your own terms, or refuse.' : ' Refuse it, or wait for better terms.'}
           </p>
+        ) : (
+          !affordable && (
+            <p className="mt-5 rounded border border-rose-900/40 bg-rose-100/60 px-3 py-1.5 text-center text-xs font-semibold text-rose-900">
+              Your stores lack the requested goods.
+            </p>
+          )
         )}
 
-        <div className={`mt-7 grid gap-3 ${onCounter ? 'grid-cols-3 max-sm:grid-cols-2' : 'grid-cols-2'}`}>
+        <div
+          className={`mt-7 grid gap-3 ${
+            columns === 3 ? 'grid-cols-3 max-sm:grid-cols-2' : columns === 2 ? 'grid-cols-2' : 'grid-cols-1'
+          }`}
+        >
           <button
             type="button"
             onClick={() => onReject(offer.offerId)}
@@ -105,19 +126,23 @@ export default function TradeOfferModal({ offer, sender, recipient, onAccept, on
               type="button"
               onClick={onCounter}
               disabled={disabled}
-              className="rounded-md border-2 border-amber-800/60 bg-gradient-to-b from-amber-100 to-amber-300 px-3 py-2.5 font-display text-sm font-black uppercase tracking-[0.2em] text-ink-900 shadow transition-all hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 max-sm:order-last max-sm:col-span-2 max-sm:text-xs"
+              className={`rounded-md border-2 border-amber-800/60 bg-gradient-to-b from-amber-100 to-amber-300 px-3 py-2.5 font-display text-sm font-black uppercase tracking-[0.2em] text-ink-900 shadow transition-all hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 max-sm:text-xs ${
+                columns === 3 ? 'max-sm:order-last max-sm:col-span-2' : ''
+              }`}
             >
               Counter-Offer
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => onAccept(offer.offerId)}
-            disabled={disabled || !affordable}
-            className="rounded-md bg-gradient-to-b from-emerald-600 to-emerald-900 px-3 py-2.5 font-display text-sm font-black uppercase tracking-[0.2em] text-parchment-50 shadow-[0_6px_18px_rgba(20,105,74,0.5)] ring-1 ring-emerald-300/40 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100 max-sm:text-xs"
-          >
-            Accept
-          </button>
+          {canAccept && (
+            <button
+              type="button"
+              onClick={() => onAccept(offer.offerId)}
+              disabled={disabled || !affordable}
+              className="rounded-md bg-gradient-to-b from-emerald-600 to-emerald-900 px-3 py-2.5 font-display text-sm font-black uppercase tracking-[0.2em] text-parchment-50 shadow-[0_6px_18px_rgba(20,105,74,0.5)] ring-1 ring-emerald-300/40 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100 max-sm:text-xs"
+            >
+              Accept
+            </button>
+          )}
         </div>
       </div>
     </div>

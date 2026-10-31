@@ -500,8 +500,9 @@ public sealed class Game
     /// Proposes a trade. The current player may address one opponent or everyone. An opponent
     /// may also propose, but only as a <em>counter-offer</em>: they must be a recipient of the
     /// outstanding offer and their proposal is addressed back to the current player. Either
-    /// side of the bundle may be empty (gifts and requests are allowed) but not both. Only one
-    /// offer can be outstanding at a time; proposing again replaces the previous one.
+    /// side of the bundle may be empty (a bare request opens a negotiation) but not both; such
+    /// a one-sided offer can only be countered or declined, never accepted. Only one offer can
+    /// be outstanding at a time; proposing again replaces the previous one.
     /// </summary>
     public TradeOffer ProposeTrade(
         Guid senderId,
@@ -567,7 +568,8 @@ public sealed class Game
 
     /// <summary>
     /// <paramref name="accepterId"/> accepts the outstanding offer. Both sides are re-checked
-    /// because hands may have changed since the offer was made.
+    /// because hands may have changed since the offer was made. A one-sided offer cannot be
+    /// accepted at all - it is only an opening of negotiations, to be countered or declined.
     /// </summary>
     public TradeOffer AcceptTrade(Guid accepterId, Guid offerId)
     {
@@ -577,6 +579,11 @@ public sealed class Game
         if (!offer.IsAddressedTo(accepterId))
         {
             throw new GameRuleException("This offer was not made to you.");
+        }
+
+        if (offer.IsOneSided)
+        {
+            throw new GameRuleException("A one-sided offer cannot be accepted - counter it with your terms.");
         }
 
         var sender = GetPlayer(offer.SenderPlayerId);

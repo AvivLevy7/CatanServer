@@ -8,6 +8,18 @@ const SOURCES = {
   dice: '/sounds/dice.mp3',
   turn: '/sounds/turn.mp3',
   chat: '/sounds/chat.mp3',
+  road: '/sounds/road.mp3',
+  settlement: '/sounds/settlement.mp3',
+  city: '/sounds/city.mp3',
+};
+
+// Chime fallbacks, as [frequency, start offset, decay] notes. The build cues rise with the
+// size of the piece: a settlement is two notes, a city a full triad.
+const NOTES = {
+  turn: [[659.25, 0, 0.5], [987.77, 0.14, 0.5]],
+  chat: [[880, 0, 0.18]],
+  settlement: [[523.25, 0, 0.22], [783.99, 0.1, 0.32]],
+  city: [[523.25, 0, 0.22], [659.25, 0.09, 0.26], [1046.5, 0.19, 0.55]],
 };
 
 const STORAGE_KEY = 'catan.muted';
@@ -28,7 +40,10 @@ function audioContext() {
   return ctx;
 }
 
-/** Synthesized fallbacks: dice = burst of short noisy clicks, turn = two-note chime, chat = soft blip. */
+/**
+ * Synthesized fallbacks: dice = burst of short noisy clicks, road = wooden knock,
+ * everything else a short chime from NOTES (turn, chat, settlement, city).
+ */
 function synth(name) {
   const ac = audioContext();
   if (!ac) return;
@@ -58,8 +73,37 @@ function synth(name) {
     return;
   }
 
-  const notes = name === 'turn' ? [[659.25, 0], [987.77, 0.14]] : [[880, 0]];
-  for (const [freq, offset] of notes) {
+  if (name === 'road') {
+    // A timber being dropped into place: short low noise burst over a falling thud.
+    const buffer = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.12), ac.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / data.length) ** 3;
+    }
+    const src = ac.createBufferSource();
+    src.buffer = buffer;
+    const bp = ac.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 340;
+    bp.Q.value = 2.5;
+    src.connect(bp).connect(master);
+    src.start(now);
+
+    const osc = ac.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(260, now);
+    osc.frequency.exponentialRampToValueAtTime(90, now + 0.12);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.7, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+    osc.connect(g).connect(master);
+    osc.start(now);
+    osc.stop(now + 0.2);
+    return;
+  }
+
+  const notes = NOTES[name] ?? NOTES.chat;
+  for (const [freq, offset, decay] of notes) {
     const osc = ac.createOscillator();
     osc.type = 'sine';
     osc.frequency.value = freq;
@@ -67,10 +111,10 @@ function synth(name) {
     const t = now + offset;
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.8, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + (name === 'turn' ? 0.5 : 0.18));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
     osc.connect(g).connect(master);
     osc.start(t);
-    osc.stop(t + 0.6);
+    osc.stop(t + decay + 0.1);
   }
 }
 

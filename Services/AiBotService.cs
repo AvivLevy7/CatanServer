@@ -488,14 +488,17 @@ internal static class BotBrain
     /// <summary>
     /// Accept when the cards received are worth more to us than the cards given: resources we
     /// are missing for our next build count high, surplus copies count low, and we never give
-    /// away something the next build needs.
+    /// away something the next build needs. A one-sided offer is never accepted (the rules
+    /// forbid it) - the bot counters it or declines instead.
     /// </summary>
     private static BotPlan AnswerTrade(GameStateDto state, BoardGraph board, RoomMember bot, TradeOfferDto offer, (GamePhase, Guid, bool, int) key)
     {
         var hand = state.Players.First(p => p.Id == bot.Id).Resources ?? new Dictionary<string, int>();
         var (_, missing, cost) = NextGoal(state, board, bot.Id);
+        var oneSided = offer.ResourcesOffered.Count == 0 || offer.ResourcesRequested.Count == 0;
 
-        var accept = CanAfford(hand, offer.ResourcesRequested)
+        var accept = !oneSided
+                     && CanAfford(hand, offer.ResourcesRequested)
                      && offer.ResourcesRequested.All(pair => hand.GetValueOrDefault(pair.Key) - pair.Value >= cost.GetValueOrDefault(pair.Key))
                      && Worth(offer.ResourcesOffered, hand, missing, receiving: true) > Worth(offer.ResourcesRequested, hand, missing, receiving: false);
 

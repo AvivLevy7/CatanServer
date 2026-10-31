@@ -60,7 +60,12 @@ function BundleColumn({ title, subtitle, bundle, setBundle, limits, lockedKeys, 
     <div className="flex flex-col items-center">
       <h3 className={`font-display text-sm font-black uppercase tracking-[0.3em] ${accent}`}>{title}</h3>
       <p className="mb-3 text-xs italic text-ink-800/60">{subtitle}</p>
-      <div className="flex flex-wrap justify-center gap-3">
+      {/*
+        Six columns, each card spanning two: three sit on the top row, and nudging the
+        fourth to column 2 leaves the remaining pair centred under them. Beats flex-wrap,
+        which left a lone Ore hanging under the other four in the narrow grid column.
+      */}
+      <div className="grid w-full grid-cols-6 justify-items-center gap-y-3 [&>*]:col-span-2 [&>*:nth-child(4)]:col-start-2">
         {RESOURCES.map(({ key }) => {
           const locked = lockedKeys.has(key) && bundle[key] === 0;
           return (
@@ -115,8 +120,11 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
 
   const giveKeys = new Set(RESOURCES.filter(({ key }) => give[key] > 0).map(({ key }) => key));
   const getKeys = new Set(RESOURCES.filter(({ key }) => get[key] > 0).map(({ key }) => key));
-  // Asymmetric trades are allowed (a gift or a plain request) - just not an empty decree.
+  // Asymmetric trades may be sent (a bare ask opens the haggling) - just not an empty decree.
   const isValidOffer = giveKeys.size > 0 || getKeys.size > 0;
+  // ...but the rules forbid giving cards away for nothing, so the recipient can only answer
+  // a one-sided decree with a counter-offer or a refusal.
+  const isOneSided = isValidOffer && (giveKeys.size === 0 || getKeys.size === 0);
   const canSend = !disabled && isValidOffer && (!activeOffer || !!counterTo);
 
   const mine = activeOffer && activeOffer.senderPlayerId === player?.id;
@@ -168,7 +176,7 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
           <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[1fr_auto_1fr]">
             <BundleColumn
               title="I Offer"
-              subtitle={getKeys.size === 0 && giveKeys.size > 0 ? 'as a gift' : 'from my own stores'}
+              subtitle={getKeys.size === 0 && giveKeys.size > 0 ? 'an opening bid' : 'from my own stores'}
               side="give"
               bundle={give}
               setBundle={setGive}
@@ -181,7 +189,7 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
             </div>
             <BundleColumn
               title="In Return"
-              subtitle={giveKeys.size === 0 && getKeys.size > 0 ? 'a plain request' : 'I ask for (may be nothing)'}
+              subtitle={giveKeys.size === 0 && getKeys.size > 0 ? 'a plain request' : 'I ask for in return'}
               side="get"
               bundle={get}
               setBundle={setGet}
@@ -241,6 +249,13 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
           {!isValidOffer && !disabled && (
             <p className="mt-4 text-center text-xs italic text-ink-800/60">
               Choose at least one card to offer or to ask for.
+            </p>
+          )}
+
+          {isOneSided && !disabled && (
+            <p className="mt-4 text-center text-xs italic text-amber-900/80">
+              Only one side is filled in: this opens the haggling, but it cannot be accepted as
+              written - they can only counter it or refuse.
             </p>
           )}
 

@@ -53,15 +53,15 @@ export default function TradePanel({ player, onTrade, disabled }) {
 
   return (
     <section aria-label="Bank trade" className={PANEL}>
-      <h2 className={H2}>Maritime Trade</h2>
+      <h2 className={`${H2} text-center`}>Maritime Trade</h2>
       <div className="rule-gold mb-3" aria-hidden="true" />
 
       <div className="flex flex-col gap-3">
         <div>
-          <p className="mb-1.5 font-display text-[10px] uppercase tracking-widest text-rose-300/80">
+          <p className="mb-1.5 text-center font-display text-[10px] uppercase tracking-widest text-rose-300/80">
             Give {currentRate}
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap justify-center gap-2">
             {RESOURCES.map(({ key }) => {
               const owned = resources[key] ?? 0;
               const rate = rateFor(key);
@@ -87,8 +87,8 @@ export default function TradePanel({ player, onTrade, disabled }) {
         </div>
 
         <div>
-          <p className="mb-1.5 font-display text-[10px] uppercase tracking-widest text-emerald-300/80">Receive 1</p>
-          <div className="flex flex-wrap gap-2">
+          <p className="mb-1.5 text-center font-display text-[10px] uppercase tracking-widest text-emerald-300/80">Receive 1</p>
+          <div className="flex flex-wrap justify-center gap-2">
             {RESOURCES.map(({ key }) => (
               <PickCard
                 key={key}
@@ -103,7 +103,7 @@ export default function TradePanel({ player, onTrade, disabled }) {
       </div>
 
       {!hasPort && (
-        <p className="mt-3 text-[11px] italic text-parchment-300/70">Settle a harbour for 3:1 or 2:1 rates.</p>
+        <p className="mt-3 text-center text-[11px] italic text-parchment-300/70">Settle a harbour for 3:1 or 2:1 rates.</p>
       )}
 
       <button type="button" onClick={() => onTrade(give, receive)} disabled={!canTrade} className={`${BTN_GOLD} mt-4 w-full`}>
