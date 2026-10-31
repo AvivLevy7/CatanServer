@@ -3,7 +3,7 @@ import GameLog from './GameLog';
 import DiceStatsChart from './DiceStatsChart';
 import { seat } from '../theme';
 import { sound } from '../audio';
-import { ChartIcon, ChatIcon, ScrollIcon, SoundOffIcon, SoundOnIcon } from './icons';
+import { ChartIcon, ChatIcon, DoNotDisturbIcon, ScrollIcon, SoundOffIcon, SoundOnIcon } from './icons';
 
 const TABS = [
   { id: 'log', label: 'Game Log', icon: ScrollIcon },
@@ -69,7 +69,17 @@ function ChatPanel({ messages, players, myPlayerId, onSend, disabled }) {
  * belongs to the action dock). Badges light up when a tab receives new content while it
  * is not the open one.
  */
-export default function SideDrawer({ log, chatMessages, players, myPlayerId, onSendChat, frequencies, disabled }) {
+export default function SideDrawer({
+  log,
+  chatMessages,
+  players,
+  myPlayerId,
+  onSendChat,
+  frequencies,
+  blockTrades,
+  onToggleBlockTrades,
+  disabled,
+}) {
   const [open, setOpen] = useState(null);
   const [muted, setMuted] = useState(sound.muted);
   // Counts seen per tab; a badge shows when the live count exceeds the seen count.
@@ -144,6 +154,20 @@ export default function SideDrawer({ log, chatMessages, players, myPlayerId, onS
             </button>
           );
         })}
+        <button
+          type="button"
+          onClick={onToggleBlockTrades}
+          title={blockTrades ? 'Trade offers are blocked - allow them again' : 'Block all incoming trade offers'}
+          aria-label={blockTrades ? 'Allow incoming trade offers' : 'Block all incoming trade offers'}
+          aria-pressed={!!blockTrades}
+          className={`pointer-events-auto flex size-12 items-center justify-center rounded-xl border shadow-xl backdrop-blur-md transition-all hover:scale-110 max-md:size-9 max-md:rounded-lg ${
+            blockTrades
+              ? 'border-rose-300 bg-rose-600/90 text-rose-50 shadow-rose-900/40'
+              : 'border-amber-700/50 bg-gray-900/85 text-parchment-100 hover:border-amber-400'
+          }`}
+        >
+          <DoNotDisturbIcon className="size-5 max-md:size-4" />
+        </button>
         <button
           type="button"
           onClick={() => sound.toggleMuted()}

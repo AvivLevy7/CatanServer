@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import PlayerTradePanel from './PlayerTradePanel';
 import TradePanel from './TradePanel';
 import { RESOURCES } from '../resources';
+import { CrossIcon } from './icons';
 
 const TABS = [
   { id: 'players', label: 'Player Trade', glyph: '\u2696' },
@@ -83,9 +84,11 @@ export default function TradeModal({
           <button
             type="button"
             onClick={onClose}
-            className="mb-1 rounded-lg border border-amber-100/30 px-3 py-1 font-display text-xs font-semibold uppercase tracking-wider text-parchment-100 transition-all hover:scale-105 hover:bg-gray-800"
+            title="Close the trade desk"
+            aria-label="Close the trade desk"
+            className="mb-1 flex size-9 items-center justify-center rounded-lg border border-amber-100/30 text-parchment-100 transition-all hover:scale-110 hover:border-rose-300/60 hover:bg-gray-800 hover:text-rose-200"
           >
-            Close
+            <CrossIcon className="size-5" />
           </button>
         </div>
 

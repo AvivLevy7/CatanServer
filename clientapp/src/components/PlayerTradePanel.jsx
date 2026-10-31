@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { RESOURCES, EMPTY_BUNDLE as EMPTY, describeBundle } from '../resources';
 import { RESOURCE_STYLE, seat } from '../theme';
+import { CheckIcon, CounterIcon, CrossIcon } from './icons';
+
+/** Round icon button for the decree's own actions (send, counter, withdraw). */
+const ACTION_BTN =
+  'flex size-12 items-center justify-center rounded-xl border-2 shadow-lg transition-all hover:scale-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100';
 
 /**
  * A resource "card" with +/- controls. Click the card to add one, click the small
@@ -162,14 +167,18 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
             <p className="mt-1 text-xs text-rose-800">Declined by {activeOffer.declinedBy.map(targetName).join(', ')}</p>
           )}
           <p className="mt-2 text-xs italic text-ink-800/60">Awaiting a reply...</p>
-          <button
-            type="button"
-            onClick={() => onCancel(activeOffer.offerId)}
-            disabled={disabled}
-            className="mt-4 rounded border border-ink-800/40 bg-ink-800/90 px-4 py-1.5 font-display text-xs font-bold uppercase tracking-widest text-parchment-100 transition-all hover:scale-105 hover:bg-ink-800 disabled:opacity-50"
-          >
-            Withdraw offer
-          </button>
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={() => onCancel(activeOffer.offerId)}
+              disabled={disabled}
+              title="Withdraw the offer"
+              aria-label="Withdraw the offer"
+              className={`${ACTION_BTN} border-ink-800/60 bg-ink-800/90 text-parchment-100 hover:bg-ink-800`}
+            >
+              <CrossIcon className="size-6" />
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -264,9 +273,11 @@ function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, o
               type="button"
               onClick={() => onPropose(target || null, give, get)}
               disabled={!canSend}
-              className="rounded-md bg-gradient-to-b from-seat-red to-rose-950 px-8 py-2.5 font-display text-sm font-black uppercase tracking-[0.25em] text-parchment-50 shadow-[0_6px_18px_rgba(139,30,45,0.5)] ring-1 ring-rose-300/40 transition-all hover:scale-105 hover:shadow-[0_8px_26px_rgba(139,30,45,0.7)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
+              title={counterTo ? 'Send the counter-offer' : 'Seal and send the offer'}
+              aria-label={counterTo ? 'Send the counter-offer' : 'Seal and send the offer'}
+              className={`${ACTION_BTN} size-16 border-rose-300/50 bg-gradient-to-b from-seat-red to-rose-950 text-parchment-50 shadow-[0_6px_18px_rgba(139,30,45,0.5)] hover:shadow-[0_8px_26px_rgba(139,30,45,0.7)]`}
             >
-              {counterTo ? 'Send Counter-Offer' : 'Seal & Send'}
+              {counterTo ? <CounterIcon className="size-7" /> : <CheckIcon className="size-7" />}
             </button>
           </div>
         </>

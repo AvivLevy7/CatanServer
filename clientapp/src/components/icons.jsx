@@ -220,3 +220,41 @@ export function ClockIcon(props) {
     </Icon>
   );
 }
+
+/** Accept / confirm. */
+export function CheckIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M4.8 12.6l4.6 4.6L19.2 7" strokeWidth="2.4" />
+    </Icon>
+  );
+}
+
+/** Reject / cancel / close. */
+export function CrossIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M6 6l12 12M18 6L6 18" strokeWidth="2.4" />
+    </Icon>
+  );
+}
+
+/** Counter-offer: the terms sent back the other way. */
+export function CounterIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M9.2 5.4L4.6 10l4.6 4.6" />
+      <path d="M4.6 10h9.6a4.8 4.8 0 0 1 4.8 4.8v3.8" />
+    </Icon>
+  );
+}
+
+/** Do not disturb: incoming trade offers are turned away. */
+export function DoNotDisturbIcon(props) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.6" />
+      <path d="M6 18L18 6" strokeWidth="2.2" />
+    </Icon>
+  );
+}

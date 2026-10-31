@@ -15,7 +15,7 @@ import PlayerStatusBar from './components/PlayerStatusBar';
 import StealPicker from './components/StealPicker';
 import TradeModal from './components/TradeModal';
 import { describeBundle } from './resources';
-import TradeOfferModal from './components/TradeOfferModal';
+import TradeOfferPanel from './components/TradeOfferPanel';
 import TurnTimer from './components/TurnTimer';
 import { LandingPage, WaitingRoom } from './components/Lobby';
 import { useGameHub } from './useGameHub';
@@ -30,6 +30,9 @@ const RESOURCE_LABELS = {
   Mountains: 'Ore',
   Desert: 'None',
 };
+
+// Remembers the "do not disturb" seat preference across reloads.
+const BLOCK_TRADES_KEY = 'catan.blockTrades';
 
 const STATUS_LABELS = {
   connecting: 'Connecting to server...',
@@ -120,6 +123,13 @@ export default function App() {
   const [tradeOpenTurn, setTradeOpenTurn] = useState(null);
   // Offer the viewer chose to counter: the trade desk opens pre-filled with it (as recipient).
   const [counterOf, setCounterOf] = useState(null);
+  // Do not disturb: incoming offers are declined on arrival instead of asking.
+  const [blockTrades, setBlockTrades] = useState(() => localStorage.getItem(BLOCK_TRADES_KEY) === '1');
+  const toggleBlockTrades = () =>
+    setBlockTrades((on) => {
+      localStorage.setItem(BLOCK_TRADES_KEY, on ? '0' : '1');
+      return !on;
+    });
 
   // Browsers gate audio behind a user gesture: unlock on the first one.
   useEffect(() => {
@@ -138,6 +148,14 @@ export default function App() {
     setLog((prev) => [...prev.slice(-99), { id: ++logSeq.current, text, tone }]);
 
   const nameOf = (id) => game?.players?.find((p) => p.id === id)?.name ?? 'Someone';
+
+  // Trades: the proposer waits; only a recipient the offer is addressed to may answer it.
+  const activeOffer = game?.activeTradeOffer ?? null;
+  const iAmOfferRecipient =
+    !!activeOffer &&
+    activeOffer.senderPlayerId !== myPlayerId &&
+    (activeOffer.targetPlayerId == null || activeOffer.targetPlayerId === myPlayerId) &&
+    !(activeOffer.declinedBy ?? []).includes(myPlayerId);
 
   // New round: wipe the log so the previous game's history does not bleed through.
   useEffect(() => {
@@ -160,16 +178,23 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastTradeResult]);
 
-  const offerForLog = game?.activeTradeOffer ?? null;
   useEffect(() => {
-    if (!offerForLog) return;
+    if (!activeOffer) return;
     appendLog(
-      `${nameOf(offerForLog.senderPlayerId)} offers ${describeBundle(offerForLog.resourcesOffered)} for ${describeBundle(
-        offerForLog.resourcesRequested,
-      )}${offerForLog.targetPlayerId ? ` to ${nameOf(offerForLog.targetPlayerId)}` : ''}.`,
+      `${nameOf(activeOffer.senderPlayerId)} offers ${describeBundle(activeOffer.resourcesOffered)} for ${describeBundle(
+        activeOffer.resourcesRequested,
+      )}${activeOffer.targetPlayerId ? ` to ${nameOf(activeOffer.targetPlayerId)}` : ''}.`,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offerForLog?.offerId]);
+  }, [activeOffer?.offerId]);
+
+  // Do not disturb: turn an incoming offer away at once so the proposer is not left waiting.
+  useEffect(() => {
+    if (!blockTrades || !activeOffer || !iAmOfferRecipient) return;
+    rejectTrade(activeOffer.offerId);
+    appendLog(`Offer from ${nameOf(activeOffer.senderPlayerId)} turned away (do not disturb).`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blockTrades, activeOffer?.offerId, iAmOfferRecipient]);
 
   const turnForLog = game?.currentTurnPlayerId ?? null;
   useEffect(() => {
@@ -313,14 +338,7 @@ export default function App() {
   const pendingDiscards = game?.pendingDiscards ?? {};
   const myDiscard = myPlayerId != null ? pendingDiscards[myPlayerId] ?? null : null;
 
-  // Trades: the sender sees a waiting view; only addressed recipients get Accept/Reject.
-  const activeOffer = game?.activeTradeOffer ?? null;
   const offerSender = players.find((p) => p.id === activeOffer?.senderPlayerId) ?? null;
-  const iAmOfferRecipient =
-    !!activeOffer &&
-    activeOffer.senderPlayerId !== myPlayerId &&
-    (activeOffer.targetPlayerId == null || activeOffer.targetPlayerId === myPlayerId) &&
-    !(activeOffer.declinedBy ?? []).includes(myPlayerId);
   const opponents = players.filter((p) => p.id !== myPlayerId);
 
   const handleNodeClick = (node) => {
@@ -544,6 +562,8 @@ export default function App() {
         myPlayerId={myPlayerId}
         onSendChat={sendChat}
         frequencies={game?.diceRollFrequencies}
+        blockTrades={blockTrades}
+        onToggleBlockTrades={toggleBlockTrades}
         disabled={!isLive}
       />
 
@@ -592,17 +612,22 @@ export default function App() {
         />
       )}
 
-      {isMainGame && activeOffer && iAmOfferRecipient && me && !(counterOf && counterOf.offerId === activeOffer.offerId) && (
-        <TradeOfferModal
-          offer={activeOffer}
-          sender={offerSender}
-          recipient={me}
-          onAccept={acceptTrade}
-          onReject={rejectTrade}
-          onCounter={() => setCounterOf(activeOffer)}
-          disabled={!isLive}
-        />
-      )}
+      {isMainGame &&
+        activeOffer &&
+        iAmOfferRecipient &&
+        me &&
+        !blockTrades &&
+        !(counterOf && counterOf.offerId === activeOffer.offerId) && (
+          <TradeOfferPanel
+            offer={activeOffer}
+            sender={offerSender}
+            recipient={me}
+            onAccept={acceptTrade}
+            onReject={rejectTrade}
+            onCounter={() => setCounterOf(activeOffer)}
+            disabled={!isLive}
+          />
+        )}
 
       {pendingRobber && iMoveRobber && (
         <StealPicker

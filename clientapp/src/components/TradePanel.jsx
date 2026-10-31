@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { RESOURCES } from '../resources';
-import { BTN_GOLD, H2, PANEL, RESOURCE_STYLE } from '../theme';
+import { H2, PANEL, RESOURCE_STYLE } from '../theme';
+import { CheckIcon } from './icons';
 
 const BANK_RATE = 4;
 
@@ -106,9 +107,18 @@ export default function TradePanel({ player, onTrade, disabled }) {
         <p className="mt-3 text-center text-[11px] italic text-parchment-300/70">Settle a harbour for 3:1 or 2:1 rates.</p>
       )}
 
-      <button type="button" onClick={() => onTrade(give, receive)} disabled={!canTrade} className={`${BTN_GOLD} mt-4 w-full`}>
-        Trade with the Bank
-      </button>
+      <div className="mt-4 flex justify-center">
+        <button
+          type="button"
+          onClick={() => onTrade(give, receive)}
+          disabled={!canTrade}
+          title="Trade with the bank"
+          aria-label="Trade with the bank"
+          className="flex size-14 items-center justify-center rounded-xl bg-gradient-to-b from-amber-200 to-amber-400 text-ink-900 shadow-lg shadow-amber-900/40 ring-1 ring-amber-100/70 transition-all hover:scale-110 hover:from-amber-100 hover:to-amber-300 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
+        >
+          <CheckIcon className="size-7" />
+        </button>
+      </div>
     </section>
   );
 }

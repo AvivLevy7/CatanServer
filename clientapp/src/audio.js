@@ -13,13 +13,22 @@ const SOURCES = {
   city: '/sounds/city.mp3',
 };
 
-// Chime fallbacks, as [frequency, start offset, decay] notes. The build cues rise with the
-// size of the piece: a settlement is two notes, a city a full triad.
+// Chime fallbacks, as [frequency, start offset, decay] notes.
 const NOTES = {
   turn: [[659.25, 0, 0.5], [987.77, 0.14, 0.5]],
   chat: [[880, 0, 0.18]],
-  settlement: [[523.25, 0, 0.22], [783.99, 0.1, 0.32]],
   city: [[523.25, 0, 0.22], [659.25, 0.09, 0.26], [1046.5, 0.19, 0.55]],
+};
+
+// Wooden-knock fallbacks: one timber dropped for a road, a brighter three-knock hammering
+// for a settlement. Same material, unmistakably different rhythm.
+const KNOCKS = {
+  road: [{ at: 0, from: 260, to: 90, body: 340, gain: 1 }],
+  settlement: [
+    { at: 0, from: 430, to: 150, body: 620, gain: 0.85 },
+    { at: 0.1, from: 430, to: 150, body: 620, gain: 0.7 },
+    { at: 0.2, from: 500, to: 170, body: 700, gain: 1 },
+  ],
 };
 
 const STORAGE_KEY = 'catan.muted';
@@ -41,8 +50,8 @@ function audioContext() {
 }
 
 /**
- * Synthesized fallbacks: dice = burst of short noisy clicks, road = wooden knock,
- * everything else a short chime from NOTES (turn, chat, settlement, city).
+ * Synthesized fallbacks: dice = burst of short noisy clicks, road and settlement = wooden
+ * knocks from KNOCKS, everything else a short chime from NOTES (turn, chat, city).
  */
 function synth(name) {
   const ac = audioContext();
@@ -73,32 +82,39 @@ function synth(name) {
     return;
   }
 
-  if (name === 'road') {
-    // A timber being dropped into place: short low noise burst over a falling thud.
-    const buffer = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.12), ac.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / data.length) ** 3;
-    }
-    const src = ac.createBufferSource();
-    src.buffer = buffer;
-    const bp = ac.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.value = 340;
-    bp.Q.value = 2.5;
-    src.connect(bp).connect(master);
-    src.start(now);
+  // Wooden placement cues are all knocks, so road / settlement sit in the same family.
+  const knocks = KNOCKS[name];
+  if (knocks) {
+    for (const { at, from, to, body, gain } of knocks) {
+      const t = now + at;
+      // Timber hitting timber: a short noise burst over a thud that drops in pitch.
+      const buffer = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.12), ac.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / data.length) ** 3;
+      }
+      const src = ac.createBufferSource();
+      src.buffer = buffer;
+      const bp = ac.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = body;
+      bp.Q.value = 2.5;
+      const noiseGain = ac.createGain();
+      noiseGain.gain.value = gain;
+      src.connect(bp).connect(noiseGain).connect(master);
+      src.start(t);
 
-    const osc = ac.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(260, now);
-    osc.frequency.exponentialRampToValueAtTime(90, now + 0.12);
-    const g = ac.createGain();
-    g.gain.setValueAtTime(0.7, now);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
-    osc.connect(g).connect(master);
-    osc.start(now);
-    osc.stop(now + 0.2);
+      const osc = ac.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(from, t);
+      osc.frequency.exponentialRampToValueAtTime(to, t + 0.12);
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0.7 * gain, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      osc.connect(g).connect(master);
+      osc.start(t);
+      osc.stop(t + 0.2);
+    }
     return;
   }
 

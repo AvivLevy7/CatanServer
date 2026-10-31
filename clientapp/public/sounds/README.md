@@ -4,6 +4,6 @@ Until then the app synthesizes equivalent cues with Web Audio:
 - dice        a rattle of clicks
 - turn        two-note chime
 - chat        soft blip
-- road        wooden knock as the timber drops in
-- settlement  rising two-note chime
+- road        one wooden knock as the timber drops in
+- settlement  three brighter wooden knocks, like posts being hammered
 - city        rising three-note triad
