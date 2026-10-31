@@ -24,6 +24,19 @@ export const DICE_ANIMATION_MS = DICE_TUMBLE_MS + DICE_REVEAL_MS;
 const TRADE_OFFERED_EVENT = 'TradeOffered';
 const TRADE_RESOLVED_EVENT = 'TradeResolved';
 
+// How long an emote bubble stays up, and the longest a negotiation icon may linger
+// before it clears itself in case the matching "done" event never arrives.
+const EMOTE_VISIBLE_MS = 3000;
+const NEGOTIATION_MAX_MS = 45000;
+
+/** Copy of `map` without `key`; returns `map` itself when the key was not there. */
+function without(map, key) {
+  if (!(key in map)) return map;
+  const next = { ...map };
+  delete next[key];
+  return next;
+}
+
 /**
  * Owns the SignalR connection and exposes the server-authoritative board and game state.
  * The hub pushes BoardState and GameState inside OnConnectedAsync, so no initial fetch is required.
@@ -49,6 +62,14 @@ export function useGameHub() {
   const [systemMessage, setSystemMessage] = useState(null);
   // Room chat history for this page load.
   const [chatMessages, setChatMessages] = useState([]);
+  // Emotes still on screen, as playerId -> { id, emote, senderName }. Self-expiring.
+  const [emotes, setEmotes] = useState({});
+  // Who is weighing the live trade offer, as playerId -> 'Inspecting' | 'Countering'.
+  const [negotiators, setNegotiators] = useState({});
+  // Bumps on every 7 so the screen can replay its vignette; 0 means "no 7 yet".
+  const [sevenPulse, setSevenPulse] = useState(0);
+  const emoteTimers = useRef(new Map());
+  const negotiationTimers = useRef(new Map());
   const [isRolling, setIsRolling] = useState(false);
   // Drives the full-screen dice overlay: { phase: 'tumbling' | 'reveal', roll, rolledBy }.
   const [rollCinematic, setRollCinematic] = useState(null);
@@ -73,6 +94,11 @@ export function useGameHub() {
       .build();
 
     connectionRef.current = connection;
+
+    // Captured once so the cleanup below does not read .current after unmount; both are
+    // stable containers, so clearing them here clears the live timers.
+    const pendingEmoteTimers = emoteTimers.current;
+    const pendingNegotiationTimers = negotiationTimers.current;
 
     // Guards against setting state after unmount, which React 19 StrictMode
     // would otherwise trigger via its double-invoked effects.
@@ -114,6 +140,12 @@ export function useGameHub() {
       rollLandRef.current = setTimeout(() => {
         if (cancelled) return;
         setRollCinematic({ phase: 'reveal', roll: event?.roll ?? null, rolledBy: event?.rolledBy ?? null });
+        // The dread lands with the number, not after it: the vignette and its cue start
+        // the moment the total is readable.
+        if (event?.roll?.total === 7) {
+          sound.play('seven');
+          setSevenPulse((n) => n + 1);
+        }
       }, DICE_TUMBLE_MS);
 
       rollRevealRef.current = setTimeout(() => {
@@ -153,9 +185,56 @@ export function useGameHub() {
       }
     });
 
+    connection.on('Emote', (emote) => {
+      if (cancelled || emote?.senderId == null) return;
+      sound.play('emote');
+      const { senderId } = emote;
+      setEmotes((prev) => ({
+        ...prev,
+        [senderId]: { id: emote.id, emote: emote.emote, senderName: emote.senderName },
+      }));
+
+      // Three seconds on screen. A fresh emote from the same seat replaces the old one,
+      // so its timer is cleared rather than left to expire the newer bubble.
+      clearTimeout(emoteTimers.current.get(senderId));
+      emoteTimers.current.set(
+        senderId,
+        setTimeout(() => {
+          emoteTimers.current.delete(senderId);
+          setEmotes((prev) => without(prev, senderId));
+        }, EMOTE_VISIBLE_MS),
+      );
+    });
+
+    connection.on('NegotiationStatus', (status) => {
+      if (cancelled || status?.playerId == null) return;
+      const { playerId, activity } = status;
+      clearTimeout(negotiationTimers.current.get(playerId));
+      negotiationTimers.current.delete(playerId);
+
+      if (!activity || activity === 'None') {
+        setNegotiators((prev) => without(prev, playerId));
+        return;
+      }
+
+      setNegotiators((prev) => ({ ...prev, [playerId]: activity }));
+      // Safety net: if the "done" event is lost (a tab closing mid-deliberation, say)
+      // the icon still clears itself instead of spinning forever.
+      negotiationTimers.current.set(
+        playerId,
+        setTimeout(() => {
+          negotiationTimers.current.delete(playerId);
+          setNegotiators((prev) => without(prev, playerId));
+        }, NEGOTIATION_MAX_MS),
+      );
+    });
+
     connection.on('GameRestarted', () => {
       if (!cancelled) {
         setWinner(null);
+        setEmotes({});
+        setNegotiators({});
+        setSevenPulse(0);
         setLastRoll(null);
         setRollCinematic(null);
         setLastRobbery(null);
@@ -235,6 +314,12 @@ export function useGameHub() {
       connection.off(TRADE_RESOLVED_EVENT);
       connection.off('ChatMessage');
       connection.off('SystemMessage');
+      connection.off('Emote');
+      connection.off('NegotiationStatus');
+      for (const timer of pendingEmoteTimers.values()) clearTimeout(timer);
+      pendingEmoteTimers.clear();
+      for (const timer of pendingNegotiationTimers.values()) clearTimeout(timer);
+      pendingNegotiationTimers.clear();
       connection.stop();
       connectionRef.current = null;
     };
@@ -395,6 +480,18 @@ export function useGameHub() {
     [invokeMove, session?.roomId],
   );
   const sendChat = useCallback((text) => invokeMove('SendChat', text), [invokeMove]);
+  // Cosmetic, so a rejected emote is swallowed rather than shown as an illegal move.
+  const sendEmote = useCallback((emote) => {
+    const connection = connectionRef.current;
+    if (connection?.state !== HubConnectionState.Connected) return;
+    connection.invoke('SendEmote', emote).catch(() => {});
+  }, []);
+  // Advisory too: never worth an error banner if it does not reach the table.
+  const setNegotiationStatus = useCallback((activity) => {
+    const connection = connectionRef.current;
+    if (connection?.state !== HubConnectionState.Connected) return;
+    connection.invoke('SetNegotiationStatus', activity).catch(() => {});
+  }, []);
 
   return {
     room,
@@ -407,6 +504,11 @@ export function useGameHub() {
     removeBot,
     chatMessages,
     sendChat,
+    emotes,
+    sendEmote,
+    negotiators,
+    setNegotiationStatus,
+    sevenPulse,
     board,
     game,
     lastRoll,

@@ -258,3 +258,48 @@ export function DoNotDisturbIcon(props) {
     </Icon>
   );
 }
+
+/** Owes a discard after a 7: cards falling off the top of the hand. */
+export function DiscardIcon(props) {
+  return (
+    <Icon {...props}>
+      <rect x="3.4" y="9.6" width="10.2" height="11.4" rx="1.8" />
+      <path d="M16.4 10.4l3.1-3.1M19.8 12.2h2.1M16.1 7.1V5" />
+      <path d="M8.5 13.4v4.2M6.4 15.5h4.2" strokeWidth="1.5" />
+    </Icon>
+  );
+}
+
+/** Weighing an offer: a pair of scales. */
+export function ScalesIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M12 4.2v15.6M8.4 20.4h7.2" />
+      <path d="M4 8.2h16" />
+      <path d="M4 8.2L1.8 13a3.1 3.1 0 0 0 4.4 0z" />
+      <path d="M20 8.2L17.8 13a3.1 3.1 0 0 0 4.4 0z" />
+    </Icon>
+  );
+}
+
+/** Opens the quick-emote wheel. */
+export function EmoteIcon(props) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.6" />
+      <path d="M8.6 14.2a4.2 4.2 0 0 0 6.8 0" />
+      <path d="M9.2 9.6h.01M14.8 9.6h.01" strokeWidth="2.6" />
+    </Icon>
+  );
+}
+
+/** Victory: a laurel-framed trophy for the end-game screen. */
+export function TrophyIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M7.6 4h8.8v4.4a4.4 4.4 0 0 1-8.8 0z" />
+      <path d="M7.6 5.4H5a2.4 2.4 0 0 0 2.6 4.3M16.4 5.4H19a2.4 2.4 0 0 1-2.6 4.3" />
+      <path d="M12 12.8v3.6M8.6 20.2h6.8l-.8-3.8H9.4z" />
+    </Icon>
+  );
+}

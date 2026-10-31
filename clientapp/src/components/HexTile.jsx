@@ -9,7 +9,14 @@ const TERRAIN_TYPES = new Set(['Forest', 'Pasture', 'Fields', 'Hills', 'Mountain
 // Pips below the number mirror the physical tokens (probability out of 36).
 const PIPS = { 2: 1, 12: 1, 3: 2, 11: 2, 4: 3, 10: 3, 5: 4, 9: 4, 6: 5, 8: 5 };
 
-export default function HexTile({ tile, isSelected, onSelect, robberMode = false }) {
+export default function HexTile({
+  tile,
+  isSelected,
+  onSelect,
+  robberMode = false,
+  producing = false,
+  dimmed = false,
+}) {
   const { type, numberToken, hasRobber } = tile;
 
   const { x, y } = hexCenter(tile);
@@ -23,15 +30,16 @@ export default function HexTile({ tile, isSelected, onSelect, robberMode = false
   return (
     <g
       transform={`translate(${x}, ${y})`}
+      data-hex-id={tile.id}
       onClick={() => onSelect?.(tile)}
       className={`group outline-none ${
         robberMode ? (isRobberTarget ? 'cursor-crosshair' : 'cursor-not-allowed') : 'cursor-pointer'
-      }`}
+      } ${dimmed ? 'hex-dimmed' : ''}`}
       role="button"
       tabIndex={0}
       aria-label={`${type}${numberToken ? `, token ${numberToken}` : ''}${hasRobber ? ', robber here' : ''}${
         isRobberTarget ? ', click to move robber here' : ''
-      }`}
+      }${producing ? ', producing now' : ''}`}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -61,6 +69,19 @@ export default function HexTile({ tile, isSelected, onSelect, robberMode = false
           } ${isRobberTarget ? 'group-hover:stroke-[5] group-hover:stroke-rose-200' : ''}`}
         />
       </g>
+
+      {/* Production flash: a warm wash plus a breathing gold rim on the tiles that
+          just paid out. Drawn over the terrain but under the number token. */}
+      {producing && (
+        <g className="pointer-events-none">
+          <polygon points={POINTS} className="animate-fade-in fill-amber-200/25" />
+          <polygon
+            points={POINTS}
+            fill="none"
+            className="animate-hex-produce stroke-amber-100 [filter:drop-shadow(0_0_8px_rgba(253,230,138,0.95))]"
+          />
+        </g>
+      )}
 
       {numberToken != null && (
         <g className="pointer-events-none" filter="url(#soft-shadow)">

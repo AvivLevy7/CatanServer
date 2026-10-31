@@ -14,6 +14,9 @@ const BOARD_HEIGHT = (ROW_LENGTHS.length - 1) * VERTICAL_STEP + 2 * HEX_SIZE;
 // Must clear the port shields (OFFSET 0.62 * HEX_SIZE + shield radius 0.3 * HEX_SIZE) plus hover scaling.
 const PADDING = HEX_SIZE * 0.98;
 
+// Shared empty default so an omitted prop never allocates a new Set per render.
+const EMPTY_SET = new Set();
+
 export default function Board({
   tiles,
   nodes = [],
@@ -27,6 +30,11 @@ export default function Board({
   upgradablePlayerId = null,
   robberMode = false,
   interactive = true,
+  // Hex ids that just produced on the latest roll; the rest of the island dims behind them.
+  producingHexIds = EMPTY_SET,
+  // Node/edge ids built within the last beat, for the drop-and-dust impact.
+  placedNodeIds = EMPTY_SET,
+  placedEdgeIds = EMPTY_SET,
 }) {
   // Every node is anchored to a real hex corner, so its position is exactly the
   // same formula HexTile uses to draw that corner - no drift between layers.
@@ -84,6 +92,8 @@ export default function Board({
             isSelected={tile.id === selectedId}
             onSelect={onTileSelect}
             robberMode={robberMode}
+            producing={producingHexIds.has(tile.id)}
+            dimmed={producingHexIds.size > 0 && !producingHexIds.has(tile.id)}
           />
         ))}
       </g>
@@ -111,6 +121,7 @@ export default function Board({
                 edge.ownerId == null &&
                 (edge.nodeAId === highlightNodeId || edge.nodeBId === highlightNodeId)
               }
+              justPlaced={placedEdgeIds.has(edge.id)}
               onClick={onEdgeClick}
             />
           );
@@ -133,6 +144,7 @@ export default function Board({
                 node.building === 'Settlement' &&
                 node.ownerId === upgradablePlayerId
               }
+              justPlaced={placedNodeIds.has(node.id)}
               onClick={onNodeClick}
             />
           );

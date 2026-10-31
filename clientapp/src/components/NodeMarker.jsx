@@ -1,3 +1,5 @@
+import DustBurst from './DustBurst';
+
 const OWNER_FILL = {
   Red: 'fill-seat-red',
   Blue: 'fill-seat-blue',
@@ -17,8 +19,18 @@ const CITY_PATH =
  * Clickable intersection. Empty nodes are invisible until hovered; occupied nodes
  * render a settlement (house) or city (castle with a gold border) in the owner's colour.
  * `upgradable` marks the current player's settlements so they read as clickable.
+ * `justPlaced` runs the drop-and-dust impact once, right after the server confirms the
+ * build - it is keyed off the state change, so every seat at the table sees it.
  */
-export default function NodeMarker({ node, x, y, ownerColor, upgradable = false, onClick }) {
+export default function NodeMarker({
+  node,
+  x,
+  y,
+  ownerColor,
+  upgradable = false,
+  justPlaced = false,
+  onClick,
+}) {
   const isEmpty = node.building === 'None';
   const isCity = node.building === 'City';
   const ownerFill = OWNER_FILL[ownerColor] ?? 'fill-stone-400';
@@ -65,13 +77,16 @@ export default function NodeMarker({ node, x, y, ownerColor, upgradable = false,
               className="fill-transparent stroke-white/0 stroke-2 transition-all duration-150 group-hover:stroke-white/80 group-focus-visible:stroke-white/80"
             />
           )}
-          <path
-            d={isCity ? CITY_PATH : SETTLEMENT_PATH}
-            strokeLinejoin="round"
-            className={`${ownerFill} drop-shadow ${
-              isCity ? 'stroke-amber-300 stroke-[2.5]' : 'stroke-stone-900 stroke-2'
-            }`}
-          />
+          <g className={justPlaced ? 'animate-piece-drop' : undefined}>
+            <path
+              d={isCity ? CITY_PATH : SETTLEMENT_PATH}
+              strokeLinejoin="round"
+              className={`${ownerFill} drop-shadow ${
+                isCity ? 'stroke-amber-300 stroke-[2.5]' : 'stroke-stone-900 stroke-2'
+              }`}
+            />
+          </g>
+          {justPlaced && <DustBurst radius={isCity ? 24 : 18} count={isCity ? 9 : 7} />}
         </>
       )}
     </g>

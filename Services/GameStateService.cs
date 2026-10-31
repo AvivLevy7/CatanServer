@@ -579,7 +579,7 @@ public sealed class GameStateService : IGameStateService
             outcome.RolledBy,
             ProjectRoll(outcome.Roll),
             outcome.Production
-                .Select(grant => new ResourceGrantDto(grant.PlayerId, grant.Resource.ToString(), grant.Amount))
+                .Select(grant => new ResourceGrantDto(grant.PlayerId, grant.Resource.ToString(), grant.Amount, grant.HexId))
                 .ToList());
 
     private static DiceRollDto ProjectRoll(DiceRoll roll) => new(roll.First, roll.Second, roll.Total);

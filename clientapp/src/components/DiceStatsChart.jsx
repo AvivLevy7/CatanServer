@@ -1,16 +1,19 @@
-// Expected share of each total on two fair dice (out of 36).
-const EXPECTED = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
-const TOTALS = Object.keys(EXPECTED).map(Number);
+import { DICE_TOTALS as TOTALS, EXPECTED_OUT_OF_36 as EXPECTED, hottestTotal } from '../diceStats';
 
 /**
  * Flex-column bar chart of dice totals rolled so far, with a faint marker at the
  * statistically expected height so players can see hot and cold numbers.
+ *
+ * `animated` grows the bars out of the baseline left to right - worth it on the victory
+ * screen, distracting in the live side drawer where it would replay on every roll.
+ * `markHottest` crowns the most-rolled total.
  */
-export default function DiceStatsChart({ frequencies, compact = false }) {
+export default function DiceStatsChart({ frequencies, compact = false, animated = false, markHottest = false }) {
   const counts = TOTALS.map((t) => frequencies?.[t] ?? 0);
   const totalRolls = counts.reduce((a, b) => a + b, 0);
   const max = Math.max(1, ...counts);
   const height = compact ? 'h-24' : 'h-48';
+  const hottest = markHottest ? hottestTotal(frequencies) : null;
 
   return (
     <div>
@@ -21,17 +24,22 @@ export default function DiceStatsChart({ frequencies, compact = false }) {
           const barPct = (count / max) * 100;
           const expectedPct = Math.min(100, (expected / max) * 100);
           const isSeven = t === 7;
+          const isHottest = hottest?.total === t;
           return (
             <div key={t} className="relative h-full flex-1" title={`${t}: ${count} time${count === 1 ? '' : 's'}`}>
               {/* Track leaves headroom at the top for the count label. */}
               <div className="absolute inset-x-0 bottom-0 top-4 rounded-t bg-gray-900/40">
                 <div
                   className={`absolute inset-x-0 bottom-0 rounded-t transition-[height] duration-300 ${
+                    animated ? 'animate-bar-grow' : ''
+                  } ${
                     isSeven
                       ? 'bg-gradient-to-t from-rose-700 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)]'
-                      : 'bg-gradient-to-t from-amber-600 to-amber-200 shadow-[0_0_10px_rgba(245,190,90,0.4)]'
+                      : isHottest
+                        ? 'bg-gradient-to-t from-amber-500 to-amber-100 shadow-[0_0_14px_rgba(253,230,138,0.7)]'
+                        : 'bg-gradient-to-t from-amber-600 to-amber-200 shadow-[0_0_10px_rgba(245,190,90,0.4)]'
                   }`}
-                  style={{ height: `${barPct}%` }}
+                  style={{ height: `${barPct}%`, '--bar-delay': animated ? `${i * 55}ms` : undefined }}
                 >
                   {count > 0 && (
                     <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px] font-semibold tabular-nums text-parchment-50">
@@ -53,7 +61,12 @@ export default function DiceStatsChart({ frequencies, compact = false }) {
       </div>
       <div className="mt-1 flex gap-1">
         {TOTALS.map((t) => (
-          <span key={t} className={`flex-1 text-center text-[11px] font-semibold ${t === 7 ? 'text-rose-300' : 'text-parchment-200'}`}>
+          <span
+            key={t}
+            className={`flex-1 text-center text-[11px] font-semibold ${
+              t === 7 ? 'text-rose-300' : hottest?.total === t ? 'font-black text-amber-100' : 'text-parchment-200'
+            }`}
+          >
             {t}
           </span>
         ))}

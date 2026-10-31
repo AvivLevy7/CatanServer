@@ -1,4 +1,9 @@
+import { useEffect } from 'react';
+import Confetti from './Confetti';
 import DiceStatsChart from './DiceStatsChart';
+import { hottestTotal, totalRollCount } from '../diceStats';
+import { TrophyIcon } from './icons';
+import { sound } from '../audio';
 
 const PLAYER_BG = {
   Red: 'bg-seat-red shadow-[0_0_8px_var(--color-seat-red-glow)]',
@@ -15,22 +20,45 @@ const VP_COLUMNS = [
   { key: 'victoryPointCards', label: 'VP cards', title: 'Victory Point development cards' },
 ];
 
+/** One figure from the match, shown in the row above the dice chart. */
+function SummaryStat({ label, value, sub }) {
+  return (
+    <div className="min-w-[5.5rem] flex-1 rounded-lg bg-black/30 px-2 py-2 text-center ring-1 ring-amber-900/40">
+      <p className="font-display text-xl font-black tabular-nums text-amber-200 max-md:text-lg">{value}</p>
+      <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-parchment-300/80">{label}</p>
+      {sub && <p className="mt-0.5 text-[10px] text-parchment-300/60">{sub}</p>}
+    </div>
+  );
+}
+
 /**
  * Full-screen overlay shown when the phase is GameOver. Sits above the board so
  * no further interaction is possible until a new game is started.
+ *
+ * As well as the final scoreboard it closes the match out with the numbers behind it:
+ * how long the game ran, which total the dice favoured, and the full 2-12 distribution.
  */
 export default function GameOverOverlay({
   winner,
   players,
   diceFrequencies,
+  turnNumber,
   isHost,
   onPlayAgain,
   onNewGame,
   disabled,
 }) {
+  // One fanfare per game over, not one per re-render.
+  useEffect(() => {
+    if (winner) sound.play('victory');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [winner?.id]);
+
   if (!winner) return null;
 
   const standings = [...players].sort((a, b) => b.victoryPoints - a.victoryPoints);
+  const rolls = totalRollCount(diceFrequencies);
+  const hottest = hottestTotal(diceFrequencies);
 
   return (
     <div
@@ -39,9 +67,15 @@ export default function GameOverOverlay({
       aria-labelledby="gameover-title"
       className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/80 p-4"
     >
-      <div className="my-auto w-full max-w-2xl shrink-0 rounded-2xl border border-amber-700/50 bg-gray-900/90 backdrop-blur-md p-6 text-center shadow-2xl ring-2 ring-amber-400/80 shadow-[0_0_40px_rgba(245,190,90,0.25)] sm:p-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-amber-300">Game Over</p>
-        <h2 id="gameover-title" className="mt-2 font-display text-4xl font-black tracking-wide text-parchment-50">
+      <Confetti />
+
+      <div className="relative my-auto w-full max-w-2xl shrink-0 rounded-2xl border border-amber-700/50 bg-gray-900/90 backdrop-blur-md p-6 text-center shadow-2xl ring-2 ring-amber-400/80 shadow-[0_0_40px_rgba(245,190,90,0.25)] sm:p-8">
+        <TrophyIcon className="mx-auto size-10 text-amber-300 drop-shadow-[0_0_14px_rgba(245,190,90,0.9)]" />
+        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-amber-300">Game Over</p>
+        <h2
+          id="gameover-title"
+          className="animate-victory-slam mt-2 font-display text-4xl font-black tracking-wide text-parchment-50"
+        >
           {winner.name} Wins!
         </h2>
         <p className="mt-1 flex items-center justify-center gap-2 text-sm text-parchment-200">
@@ -91,9 +125,22 @@ export default function GameOverOverlay({
           </table>
         </div>
 
-        <div className="mt-6 rounded-xl bg-black/30 ring-1 ring-amber-900/30 p-4 text-left">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-parchment-300/80">Dice this game</h3>
-          <DiceStatsChart frequencies={diceFrequencies} compact />
+        <div className="mt-5 flex flex-wrap gap-2" aria-label="Match summary">
+          <SummaryStat label="Turns" value={turnNumber ?? '-'} />
+          <SummaryStat label="Rolls" value={rolls} />
+          <SummaryStat
+            label="Hottest"
+            value={hottest ? hottest.total : '-'}
+            sub={hottest ? `${hottest.count}x rolled` : 'no rolls yet'}
+          />
+          <SummaryStat label="Winning VP" value={winner.victoryPoints} />
+        </div>
+
+        <div className="mt-4 rounded-xl bg-black/30 ring-1 ring-amber-900/30 p-4 text-left">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-parchment-300/80">
+            Dice this game
+          </h3>
+          <DiceStatsChart frequencies={diceFrequencies} compact animated markHottest />
         </div>
 
         {isHost ? (

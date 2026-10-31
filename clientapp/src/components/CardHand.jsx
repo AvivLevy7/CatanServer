@@ -139,8 +139,9 @@ export default function CardHand({ player, onPlayDevCard, canPlay, deckRemaining
       aria-label="Your hand"
       className="panel-glass pointer-events-auto flex animate-hud-rise items-end gap-3 overflow-visible rounded-2xl px-3 py-2.5 max-md:gap-2 max-md:rounded-xl max-md:px-2 max-md:py-1.5"
     >
-      {/* Resources */}
-      <div className="flex items-end" aria-label="Your resources">
+      {/* Resources. data-resource-hand is the landing point for the viewer's own flying
+          resource icons after a roll. */}
+      <div className="flex items-end" aria-label="Your resources" data-resource-hand="">
         {total === 0 && <CardBack label="Empty" />}
         {owned.map(({ key }, i) => (
           <ResourceCardFace

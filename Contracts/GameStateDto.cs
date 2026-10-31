@@ -117,7 +117,11 @@ public sealed record ClientGameStateDto : GameStateDto
 /// <summary>Broadcast when the robber steals so clients can show who lost what.</summary>
 public sealed record RobberMovedDto(Guid MovedBy, string HexId, Guid? VictimId, string? StolenResource);
 
-public sealed record ResourceGrantDto(Guid PlayerId, string Resource, int Amount);
+/// <summary>
+/// Resources handed to one player by one hex. <paramref name="HexId"/> is the producing
+/// tile ("q,r") so the client can fly the icons from that hex to the receiving seat.
+/// </summary>
+public sealed record ResourceGrantDto(Guid PlayerId, string Resource, int Amount, string HexId);
 
 /// <summary>Broadcast after a roll so clients can animate dice and resource gains.</summary>
 public sealed record DiceRolledDto(
@@ -130,3 +134,44 @@ public sealed record SystemMessageDto(string Text, string Tone, DateTimeOffset A
 
 /// <summary>A player's chat line, relayed to the whole room.</summary>
 public sealed record ChatMessageDto(Guid Id, Guid SenderId, string SenderName, string Text, DateTimeOffset At);
+
+/// <summary>
+/// A quick visual reaction from one seat. <paramref name="Emote"/> is one of
+/// <see cref="Emotes.Allowed"/>; the client maps it to a glyph and a speech bubble.
+/// </summary>
+public sealed record EmoteDto(Guid Id, Guid SenderId, string SenderName, string Emote, DateTimeOffset At);
+
+/// <summary>
+/// What a seat is currently doing with the live trade offer, so everyone can see who is
+/// still thinking. <paramref name="Activity"/> is one of <see cref="Negotiation.Allowed"/>.
+/// </summary>
+public sealed record NegotiationStatusDto(Guid PlayerId, string Activity);
+
+/// <summary>Emote vocabulary. The hub rejects anything outside this set.</summary>
+public static class Emotes
+{
+    public static readonly IReadOnlySet<string> Allowed = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "BeggingSheep",
+        "AngryRobber",
+        "Thanks",
+        "HurryUp",
+        "ThumbsUp",
+        "Taunt",
+    };
+}
+
+/// <summary>Negotiation vocabulary: looking at an offer, drafting a counter, or done.</summary>
+public static class Negotiation
+{
+    public const string None = "None";
+    public const string Inspecting = "Inspecting";
+    public const string Countering = "Countering";
+
+    public static readonly IReadOnlySet<string> Allowed = new HashSet<string>(StringComparer.Ordinal)
+    {
+        None,
+        Inspecting,
+        Countering,
+    };
+}

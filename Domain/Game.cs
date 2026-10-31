@@ -196,7 +196,11 @@ public sealed class Game
             if (Board.GetHex(hexCoordinate)?.Produces is { } resource)
             {
                 player.AddResources(resource, 1);
-                grants.Add(new ResourceGrant(playerId, resource, 1));
+                grants.Add(new ResourceGrant(
+                    playerId,
+                    resource,
+                    1,
+                    $"{hexCoordinate.Q},{hexCoordinate.R}"));
             }
         }
 
@@ -933,7 +937,10 @@ public sealed class Game
                 throw new GameRuleException("That player has no building next to that tile.");
             }
 
-            stolen = StealRandomCard(from: GetPlayer(victimId.Value), to: GetPlayer(playerId));
+            stolen = StealRandomCard(
+                from: GetPlayer(victimId.Value),
+                to: GetPlayer(playerId),
+                atHex: $"{hex.Coordinate.Q},{hex.Coordinate.R}");
         }
 
         RobberHex.HasRobber = false;
@@ -975,7 +982,7 @@ public sealed class Game
         Phase = _pendingDiscards.Count > 0 ? GamePhase.WaitingForDiscards : GamePhase.MovingRobber;
     }
 
-    private ResourceGrant? StealRandomCard(Player from, Player to)
+    private ResourceGrant? StealRandomCard(Player from, Player to, string atHex)
     {
         // Weight by count so each physical card is equally likely.
         var pool = from.Resources
@@ -990,7 +997,7 @@ public sealed class Game
         var resource = pool[_random.Next(pool.Length)];
         from.Pay(new Dictionary<ResourceType, int> { [resource] = 1 });
         to.AddResources(resource, 1);
-        return new ResourceGrant(to.Id, resource, 1);
+        return new ResourceGrant(to.Id, resource, 1, atHex);
     }
 
     public Player EndTurn() => EndTurn(CurrentTurnPlayerId);
@@ -1447,7 +1454,11 @@ public sealed class Game
 
                 var building = new Building(nodeId, node.OwnerId!.Value, node.Building);
                 GetPlayer(building.OwnerId).AddResources(resource, building.Yield);
-                grants.Add(new ResourceGrant(building.OwnerId, resource, building.Yield));
+                grants.Add(new ResourceGrant(
+                    building.OwnerId,
+                    resource,
+                    building.Yield,
+                    $"{hex.Coordinate.Q},{hex.Coordinate.R}"));
             }
         }
 
@@ -1455,8 +1466,11 @@ public sealed class Game
     }
 }
 
-/// <summary>Resources handed to one player from a single hex during production.</summary>
-public sealed record ResourceGrant(Guid PlayerId, ResourceType Resource, int Amount);
+/// <summary>
+/// Resources handed to one player from a single hex during production. <paramref name="HexId"/>
+/// is that hex's wire id ("q,r"), which the client animates the icons out of.
+/// </summary>
+public sealed record ResourceGrant(Guid PlayerId, ResourceType Resource, int Amount, string HexId);
 
 /// <summary>Everything that happened as a result of one dice roll.</summary>
 public sealed record RollOutcome(Guid RolledBy, DiceRoll Roll, IReadOnlyList<ResourceGrant> Production);

@@ -11,6 +11,10 @@ const SOURCES = {
   road: '/sounds/road.mp3',
   settlement: '/sounds/settlement.mp3',
   city: '/sounds/city.mp3',
+  seven: '/sounds/seven.mp3',
+  emote: '/sounds/emote.mp3',
+  steal: '/sounds/steal.mp3',
+  victory: '/sounds/victory.mp3',
 };
 
 // Chime fallbacks, as [frequency, start offset, decay] notes.
@@ -18,6 +22,15 @@ const NOTES = {
   turn: [[659.25, 0, 0.5], [987.77, 0.14, 0.5]],
   chat: [[880, 0, 0.18]],
   city: [[523.25, 0, 0.22], [659.25, 0.09, 0.26], [1046.5, 0.19, 0.55]],
+  // A light two-note blip, so an emote never competes with a game event.
+  emote: [[1174.66, 0, 0.1], [1567.98, 0.07, 0.14]],
+  // Rising major triad + octave: the only fanfare in the set.
+  victory: [
+    [523.25, 0, 0.3],
+    [659.25, 0.11, 0.3],
+    [783.99, 0.22, 0.34],
+    [1046.5, 0.33, 0.9],
+  ],
 };
 
 // Wooden-knock fallbacks: one timber dropped for a road, a brighter three-knock hammering
@@ -79,6 +92,52 @@ function synth(name) {
       src.connect(bp).connect(g).connect(master);
       src.start(t);
     }
+    return;
+  }
+
+  // Rolling a 7: a dissonant pair of low sawtooth tones swelling under a slow
+  // downward sweep. Tense rather than loud, and short enough not to outstay the vignette.
+  if (name === 'seven') {
+    const swell = ac.createGain();
+    swell.gain.setValueAtTime(0.0001, now);
+    swell.gain.exponentialRampToValueAtTime(0.9, now + 0.3);
+    swell.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
+    swell.connect(master);
+
+    // A minor second apart: the interval the ear reads as alarm.
+    for (const [freq, drop] of [[82.41, 62], [87.31, 66]]) {
+      const osc = ac.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.frequency.exponentialRampToValueAtTime(drop, now + 1.4);
+      const lp = ac.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(900, now);
+      lp.frequency.exponentialRampToValueAtTime(240, now + 1.4);
+      osc.connect(lp).connect(swell);
+      osc.start(now);
+      osc.stop(now + 1.6);
+    }
+    return;
+  }
+
+  // The blind steal: a card sliding out of a hand, as filtered noise sweeping upward.
+  if (name === 'steal') {
+    const buffer = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.3), ac.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / data.length;
+      data[i] = (Math.random() * 2 - 1) * Math.sin(Math.PI * t) * 0.8;
+    }
+    const src = ac.createBufferSource();
+    src.buffer = buffer;
+    const bp = ac.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.6;
+    bp.frequency.setValueAtTime(600, now);
+    bp.frequency.exponentialRampToValueAtTime(3600, now + 0.26);
+    src.connect(bp).connect(master);
+    src.start(now);
     return;
   }
 

@@ -9,16 +9,22 @@ import CardHand from './components/CardHand';
 import SideDrawer from './components/SideDrawer';
 import { MonopolyModal, YearOfPlentyModal } from './components/DevCardModals';
 import DiscardModal from './components/DiscardModal';
+import EmoteBubbleLayer from './components/EmoteBubbleLayer';
+import EmoteWheel from './components/EmoteWheel';
+import FlyingResources from './components/FlyingResources';
 import GameOverOverlay from './components/GameOverOverlay';
 import PhaseBanner from './components/PhaseBanner';
 import PlayerStatusBar from './components/PlayerStatusBar';
+import SevenVignette from './components/SevenVignette';
 import StealPicker from './components/StealPicker';
+import BlindStealOverlay from './components/BlindStealOverlay';
 import TradeModal from './components/TradeModal';
 import { describeBundle } from './resources';
 import TradeOfferPanel from './components/TradeOfferPanel';
 import TurnTimer from './components/TurnTimer';
 import { LandingPage, WaitingRoom } from './components/Lobby';
 import { useGameHub } from './useGameHub';
+import { usePlacementImpact } from './usePlacementImpact';
 import { ExitIcon } from './components/icons';
 import { sound } from './audio';
 
@@ -33,6 +39,24 @@ const RESOURCE_LABELS = {
 
 // Remembers the "do not disturb" seat preference across reloads.
 const BLOCK_TRADES_KEY = 'catan.blockTrades';
+
+// How long the rolled number's hexes stay lit after a roll resolves.
+const HEX_HIGHLIGHT_MS = 1500;
+
+// At most this many icons fly per grant, so a city on a double hex does not spray the screen.
+const MAX_FLIGHT_ICONS_PER_GRANT = 3;
+
+// Standard building costs, mirrored from Domain/GameRules.cs. Used only to decide whether
+// the End Turn button should nudge the player: the server remains the authority on legality.
+const BUILD_COSTS = {
+  road: { Lumber: 1, Brick: 1 },
+  settlement: { Lumber: 1, Brick: 1, Grain: 1, Wool: 1 },
+  city: { Grain: 2, Ore: 3 },
+  developmentCard: { Ore: 1, Grain: 1, Wool: 1 },
+};
+
+const canAfford = (resources, cost) =>
+  Object.entries(cost).every(([key, amount]) => (resources?.[key] ?? 0) >= amount);
 
 const STATUS_LABELS = {
   connecting: 'Connecting to server...',
@@ -113,6 +137,12 @@ export default function App() {
     removeBot,
     chatMessages,
     sendChat,
+    emotes,
+    sendEmote,
+    negotiators,
+    setNegotiationStatus,
+    sevenPulse,
+    lastRobbery,
   } = useGameHub();
   const [selected, setSelected] = useState(null);
   // Robber destination awaiting a steal-target choice.
@@ -123,6 +153,12 @@ export default function App() {
   const [tradeOpenTurn, setTradeOpenTurn] = useState(null);
   // Offer the viewer chose to counter: the trade desk opens pre-filled with it (as recipient).
   const [counterOf, setCounterOf] = useState(null);
+  // The rolled number's hexes, lit for a beat after the roll resolves: { id, hexIds }.
+  const [producingRoll, setProducingRoll] = useState(null);
+  // One roll's payout in flight: { id, flights }.
+  const [flightBurst, setFlightBurst] = useState(null);
+  // Victim chosen, now picking a face-down card: { hexId, victimId, priorRobbery }.
+  const [pendingSteal, setPendingSteal] = useState(null);
   // Do not disturb: incoming offers are declined on arrival instead of asking.
   const [blockTrades, setBlockTrades] = useState(() => localStorage.getItem(BLOCK_TRADES_KEY) === '1');
   const toggleBlockTrades = () =>
@@ -218,6 +254,77 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastChat?.id]);
 
+  // ---- Game juice. These run before the routing returns below, so the hook order is
+  // ---- identical on every render whatever screen is showing. ----
+
+  // Freshest board: GameState carries node/edge ownership, BoardState is the fallback.
+  const juiceHexes = game?.board?.hexes ?? board?.hexes;
+  const juiceNodes = game?.board?.nodes ?? board?.nodes;
+  const juiceEdges = game?.board?.edges ?? board?.edges;
+
+  // Pieces that landed on the board within the last beat, from diffing server snapshots -
+  // so every seat sees every placement, bots included.
+  const placementImpact = usePlacementImpact(juiceNodes, juiceEdges, restartCount);
+
+  // A roll resolving lights the matching hexes and sends their goods flying to whoever
+  // collected them. Both are keyed off a monotonic id so a fast follow-up roll cannot
+  // have its highlight cleared by the previous roll's timer.
+  const rollSeq = useRef(0);
+  useEffect(() => {
+    if (!lastRoll) return undefined;
+    const total = lastRoll.roll?.total ?? lastRoll.roll ?? null;
+    const id = ++rollSeq.current;
+
+    const flights = [];
+    for (const grant of lastRoll.production ?? []) {
+      if (!grant?.hexId) continue;
+      const copies = Math.max(1, Math.min(grant.amount ?? 1, MAX_FLIGHT_ICONS_PER_GRANT));
+      for (let i = 0; i < copies; i++) {
+        flights.push({
+          key: `${id}-${flights.length}`,
+          resource: grant.resource,
+          hexId: grant.hexId,
+          playerId: grant.playerId,
+          playerName: nameOf(grant.playerId),
+          isMe: grant.playerId === myPlayerId,
+        });
+      }
+    }
+    setFlightBurst(flights.length > 0 ? { id, flights } : null);
+
+    // A 7 produces nothing, and gets the vignette instead of a warm glow.
+    if (total == null || total === 7) return undefined;
+
+    // Every tile bearing the rolled number, minus any the robber is sitting on: that one
+    // pays nobody, so lighting it would be a lie.
+    const hexIds = new Set(
+      (juiceHexes ?? [])
+        .filter((hex) => hex.numberToken === total && !hex.hasRobber)
+        .map((hex) => hex.id),
+    );
+    if (hexIds.size === 0) return undefined;
+
+    setProducingRoll({ id, hexIds });
+    const timer = setTimeout(
+      () => setProducingRoll((current) => (current?.id === id ? null : current)),
+      HEX_HIGHLIGHT_MS,
+    );
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastRoll]);
+
+  // Tell the table when this seat is reading an offer or drafting a counter. Only
+  // transitions are sent, so the hub is not spammed on every unrelated re-render.
+  const lastNegotiationRef = useRef('None');
+  const counterDeskOpen = !!(counterOf && activeOffer && counterOf.offerId === activeOffer.offerId && iAmOfferRecipient);
+  const inspectingOffer = !!(game?.phase === 'MainGame' && activeOffer && iAmOfferRecipient && !blockTrades);
+  useEffect(() => {
+    const activity = counterDeskOpen ? 'Countering' : inspectingOffer ? 'Inspecting' : 'None';
+    if (activity === lastNegotiationRef.current) return;
+    lastNegotiationRef.current = activity;
+    setNegotiationStatus(activity);
+  }, [counterDeskOpen, inspectingOffer, setNegotiationStatus]);
+
   const isLive = status === 'connected';
 
   // Wait for the socket, then route: no room -> landing, lobby -> waiting room, in game -> board.
@@ -300,6 +407,28 @@ export default function App() {
   const canBuyDev = canBuild && canAffordDevCard && deckRemaining !== 0;
   const waitingOn = currentPlayer?.name ?? 'the current player';
 
+  // Can this seat still do anything but end the turn? Costs and piece stock are checked
+  // here (and a city needs a settlement of one's own to upgrade); whether a legal spot
+  // exists for a road or settlement is left to the server, which rejects bad placements
+  // anyway. Being slightly generous is the safe direction: a false "you are stuck" is far
+  // worse than missing a nudge.
+  const myUnplayedDevCards = (me?.developmentCards ?? []).filter((c) => !c.isPlayed);
+  const iOwnASettlement = (liveBoard.nodes ?? []).some(
+    (node) => node.building === 'Settlement' && node.ownerId === myPlayerId,
+  );
+  const couldStillBuild =
+    (canAfford(myResources, BUILD_COSTS.road) && (me?.roadsRemaining ?? 0) > 0) ||
+    (canAfford(myResources, BUILD_COSTS.settlement) && (me?.settlementsRemaining ?? 0) > 0) ||
+    (canAfford(myResources, BUILD_COSTS.city) && (me?.citiesRemaining ?? 0) > 0 && iOwnASettlement) ||
+    (canAfford(myResources, BUILD_COSTS.developmentCard) && deckRemaining !== 0);
+  const couldStillPlayACard = myUnplayedDevCards.some(
+    (card) => card.canPlayNow && card.type !== 'VictoryPoint',
+  );
+  // The nudge is held back while an offer of theirs is live - they are waiting on an
+  // answer, not stalling - and while a modal still owes them a decision.
+  const nothingLeftToDo =
+    canAct && isMainGame && hasRolled && !couldStillBuild && !couldStillPlayACard && !activeOffer;
+
   const rollHint = isRolling
     ? 'Rolling...'
     : canRollNow
@@ -332,7 +461,9 @@ export default function App() {
     ? `Waiting for ${waitingOn}`
     : !hasRolled
       ? 'You must roll before ending your turn'
-      : 'End your turn';
+      : nothingLeftToDo
+        ? 'Nothing left to build or play - end your turn'
+        : 'End your turn';
 
   // Discards: only this tab's own debt is shown here.
   const pendingDiscards = game?.pendingDiscards ?? {};
@@ -395,26 +526,40 @@ export default function App() {
 
     const candidateIds = await getStealCandidates(tile.id);
     if (candidateIds.length === 0) {
+      // Nobody to rob: the robber just moves.
       moveRobber(tile.id, null);
     } else if (candidateIds.length === 1) {
-      moveRobber(tile.id, candidateIds[0]);
+      // Only one neighbour, so skip the chooser and go straight to their hand.
+      openBlindSteal(tile.id, candidateIds[0]);
     } else {
       setPendingRobber({ hexId: tile.id, candidateIds });
     }
   };
 
-  const handleStealPick = async (victimId) => {
+  // Remembering the robbery event that was current when the hand opens is what lets the
+  // overlay tell "the server has answered my steal" from "a steal happened earlier".
+  const openBlindSteal = (hexId, victimId) =>
+    setPendingSteal({ hexId, victimId, priorRobbery: lastRobbery });
+
+  const handleStealPick = (victimId) => {
     const { hexId } = pendingRobber;
     setPendingRobber(null);
-    await moveRobber(hexId, victimId);
+    openBlindSteal(hexId, victimId);
   };
+
+  // The card the thief turned over, but only for the robbery their own pick caused.
+  const stealVictim = players.find((p) => p.id === pendingSteal?.victimId) ?? null;
+  const revealedSteal =
+    pendingSteal && lastRobbery && lastRobbery !== pendingSteal.priorRobbery && lastRobbery.hexId === pendingSteal.hexId
+      ? lastRobbery.stolenResource ?? null
+      : null;
 
   return (
     <main className="bg-tavern relative h-[100dvh] max-h-[100dvh] w-[100dvw] max-w-[100dvw] overflow-hidden text-parchment-100">
       {/* ---- Layer 0: the board IS the screen. Everything else floats over it. ---- */}
       <div
         aria-label="Board"
-        className="board-backdrop fixed inset-0 z-0 h-[100dvh] w-[100dvw] touch-none overflow-hidden"
+        className="board-backdrop ocean-alive fixed inset-0 z-0 h-[100dvh] w-[100dvw] touch-none overflow-hidden"
       >
         <ZoomableBoard padClass="px-6 pb-28 pt-[5.5rem] max-md:px-2 max-md:pb-20 max-md:pt-14">
           <Board
@@ -430,6 +575,9 @@ export default function App() {
             upgradablePlayerId={isMainGame && isMyTurn ? myPlayerId : null}
             robberMode={iMoveRobber}
             interactive={!isRolling && (iMoveRobber || (canAct && (isSetup || isPlacingFreeRoads || canBuild)))}
+            producingHexIds={producingRoll?.hexIds}
+            placedNodeIds={placementImpact.nodes}
+            placedEdgeIds={placementImpact.edges}
           />
         </ZoomableBoard>
       </div>
@@ -445,6 +593,8 @@ export default function App() {
             myPlayerId={myPlayerId}
             largestArmyHolderId={game?.largestArmyHolderId}
             longestRoadHolderId={game?.longestRoadHolderId}
+            pendingDiscards={pendingDiscards}
+            negotiators={negotiators}
           />
         ) : (
           <p className="panel-glass pointer-events-auto rounded-lg px-3 py-1 text-xs italic text-parchment-300">
@@ -535,6 +685,7 @@ export default function App() {
         tradeHint={tradeHint}
         buyHint={buyHint}
         endTurnHint={endTurnHint}
+        pulseEndTurn={nothingLeftToDo}
       />
 
       {/* ---- Bottom: the viewer's own hand, centred over the board ---- */}
@@ -554,6 +705,16 @@ export default function App() {
         cinematic={rollCinematic}
         rolledByName={rollCinematic?.rolledBy != null ? nameOf(rollCinematic.rolledBy) : null}
       />
+
+      {/* ---- A 7: the screen edges close in, dark and red ---- */}
+      <SevenVignette pulseKey={sevenPulse} />
+
+      {/* ---- Production in flight: hex centres to the seats that collected ---- */}
+      <FlyingResources burst={flightBurst} onDone={() => setFlightBurst(null)} />
+
+      {/* ---- Emotes: a bubble over the sender's seat chip ---- */}
+      <EmoteBubbleLayer emotes={emotes} />
+      <EmoteWheel onEmote={sendEmote} disabled={!isLive} />
 
       <SideDrawer
         log={log}
@@ -629,6 +790,24 @@ export default function App() {
           />
         )}
 
+      {/* The hand of face-down cards. Its own timers close it, so the render condition
+          deliberately does not depend on the robber phase - which the server has already
+          ended by the time the stolen card is revealed. */}
+      {pendingSteal && (
+        <BlindStealOverlay
+          victim={stealVictim}
+          stolenResource={revealedSteal}
+          onPick={async () => {
+            const moved = await moveRobber(pendingSteal.hexId, pendingSteal.victimId);
+            // Rejected (a stale click, say): drop the overlay and let the error banner talk.
+            if (!moved) setPendingSteal(null);
+          }}
+          onCancel={() => setPendingSteal(null)}
+          onDone={() => setPendingSteal(null)}
+          disabled={!isLive}
+        />
+      )}
+
       {pendingRobber && iMoveRobber && (
         <StealPicker
           candidates={players.filter((p) => pendingRobber.candidateIds.includes(p.id))}
@@ -667,6 +846,7 @@ export default function App() {
           winner={winningPlayer}
           players={players}
           diceFrequencies={game?.diceRollFrequencies}
+          turnNumber={game?.turnNumber}
           isHost={room.hostPlayerId === myPlayerId}
           onPlayAgain={restartGame}
           onNewGame={leaveRoom}

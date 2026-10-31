@@ -25,6 +25,12 @@ public interface IGameClient
     /// <summary>Room chat.</summary>
     Task ChatMessage(ChatMessageDto message);
 
+    /// <summary>A seat fired off a quick visual reaction.</summary>
+    Task Emote(EmoteDto emote);
+
+    /// <summary>A seat started or stopped weighing the live trade offer.</summary>
+    Task NegotiationStatus(NegotiationStatusDto status);
+
     Task DiceRolled(DiceRolledDto roll);
 
     Task RobberMoved(RobberMovedDto robber);

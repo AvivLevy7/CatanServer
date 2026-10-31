@@ -229,6 +229,44 @@ public sealed class GameHub : Hub<IGameClient>
         await Clients.Group(room.Id).ChatMessage(new ChatMessageDto(Guid.NewGuid(), me, name, trimmed, DateTimeOffset.UtcNow));
     }
 
+    /// <summary>
+    /// Fires a quick visual reaction (a "begging for sheep" face, a thumbs up) at the whole
+    /// table. Purely cosmetic, so it is allowed in the lobby too, but the vocabulary is
+    /// fixed server-side: a client cannot smuggle arbitrary text through this channel.
+    /// </summary>
+    public async Task SendEmote(string emote)
+    {
+        var room = CurrentRoom();
+        var me = CurrentPlayerId();
+
+        if (!Emotes.Allowed.Contains(emote))
+        {
+            throw new HubException("Unknown emote.");
+        }
+
+        var name = room.FindById(me)?.Name ?? "Someone";
+        await Clients.Group(room.Id).Emote(new EmoteDto(Guid.NewGuid(), me, name, emote, DateTimeOffset.UtcNow));
+    }
+
+    /// <summary>
+    /// Tells the table that this seat is reading the live offer or drafting a counter, so the
+    /// others can see who they are waiting on. Advisory only - it grants no rights and is
+    /// never consulted when a trade is resolved.
+    /// </summary>
+    public async Task SetNegotiationStatus(string activity)
+    {
+        var room = CurrentRoom();
+        var me = CurrentPlayerId();
+
+        if (!Negotiation.Allowed.Contains(activity))
+        {
+            throw new HubException("Unknown negotiation status.");
+        }
+
+        await Clients.GroupExcept(room.Id, Context.ConnectionId)
+            .NegotiationStatus(new NegotiationStatusDto(me, activity));
+    }
+
     // ---------------------------------------------------------------- Queries
 
     public BoardStateDto GetBoardState() => CurrentGame().GetBoardState();

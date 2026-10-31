@@ -1,3 +1,5 @@
+import DustBurst from './DustBurst';
+
 const OWNER_STROKE = {
   Red: 'stroke-seat-red',
   Blue: 'stroke-seat-blue',
@@ -9,8 +11,17 @@ const OWNER_STROKE = {
 /**
  * Clickable path between two intersections. Drawn slightly shorter than the hex
  * side so adjacent roads never overlap the node markers at either end.
+ * `justPlaced` snaps the new timber into place with a puff of dust at its midpoint.
  */
-export default function EdgeMarker({ edge, from, to, ownerColor, highlighted = false, onClick }) {
+export default function EdgeMarker({
+  edge,
+  from,
+  to,
+  ownerColor,
+  highlighted = false,
+  justPlaced = false,
+  onClick,
+}) {
   const hasRoad = edge.ownerId != null;
 
   // Trim 18% from each end so roads stop short of the corner markers.
@@ -46,14 +57,21 @@ export default function EdgeMarker({ edge, from, to, ownerColor, highlighted = f
         x2={x2}
         y2={y2}
         strokeLinecap="round"
-        className={
+        className={`${
           hasRoad
             ? `${OWNER_STROKE[ownerColor] ?? 'stroke-stone-400'} stroke-[7] drop-shadow`
             : highlighted
               ? 'animate-pulse stroke-amber-200 stroke-[6] group-hover:stroke-white'
               : 'stroke-white/0 stroke-[6] transition-all duration-150 group-hover:stroke-white/60 group-focus-visible:stroke-white/60'
-        }
+        } ${justPlaced ? 'animate-road-snap' : ''}`}
       />
+
+      {/* Dust rises from the middle of the new road. */}
+      {justPlaced && (
+        <g transform={`translate(${((x1 + x2) / 2).toFixed(2)}, ${((y1 + y2) / 2).toFixed(2)})`}>
+          <DustBurst radius={15} count={6} />
+        </g>
+      )}
     </g>
   );
 }

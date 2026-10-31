@@ -44,6 +44,9 @@ export default function ActionDock({
   tradeHint,
   buyHint,
   endTurnHint,
+  // True when the player has rolled and has nothing left they can build or play: the
+  // button nudges them along rather than letting the table wait on a dead turn.
+  pulseEndTurn = false,
 }) {
   return (
     <nav
@@ -116,7 +119,7 @@ export default function ActionDock({
           canEndTurn
             ? 'border-emerald-300/70 bg-emerald-800/80 text-emerald-50 hover:border-emerald-200 hover:bg-emerald-700/90'
             : DOCK_IDLE
-        }`}
+        } ${pulseEndTurn && canEndTurn ? 'animate-endturn-pulse' : ''}`}
       >
         <EndTurnIcon className="size-6 max-md:size-5" />
       </button>
