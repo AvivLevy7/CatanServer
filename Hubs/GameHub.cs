@@ -16,13 +16,20 @@ public sealed class GameHub : Hub<IGameClient>
 
     private readonly RoomManager _rooms;
     private readonly TurnTimerService _timers;
+    private readonly TradeTimerService _tradeTimers;
     private readonly AiBotService _bots;
     private readonly ILogger<GameHub> _logger;
 
-    public GameHub(RoomManager rooms, TurnTimerService timers, AiBotService bots, ILogger<GameHub> logger)
+    public GameHub(
+        RoomManager rooms,
+        TurnTimerService timers,
+        TradeTimerService tradeTimers,
+        AiBotService bots,
+        ILogger<GameHub> logger)
     {
         _rooms = rooms;
         _timers = timers;
+        _tradeTimers = tradeTimers;
         _bots = bots;
         _logger = logger;
     }
@@ -187,6 +194,7 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         _logger.LogInformation("Room {RoomId} restarted by host {Player}", room.Id, me);
+        room.ClearWishlists();
         await Clients.Group(room.Id).GameRestarted();
         await Clients.Group(room.Id).BoardState(state.Board);
         await BroadcastGameState(room, state);
@@ -204,6 +212,12 @@ public sealed class GameHub : Hub<IGameClient>
         {
             await Clients.Caller.BoardState(room.Game.GetBoardState());
             await Clients.Caller.GameState(new ClientGameStateDto(room.Game.GetGameState(), playerId));
+        }
+
+        // Standing wants/offers are room state, so a refresh or a late join still sees them.
+        foreach (var wishlist in room.Wishlists)
+        {
+            await Clients.Caller.TradeWishlist(wishlist);
         }
     }
 
@@ -246,6 +260,33 @@ public sealed class GameHub : Hub<IGameClient>
 
         var name = room.FindById(me)?.Name ?? "Someone";
         await Clients.Group(room.Id).Emote(new EmoteDto(Guid.NewGuid(), me, name, emote, DateTimeOffset.UtcNow));
+    }
+
+    /// <summary>
+    /// Advertises what this seat wants and what it will part with, so the player whose turn it
+    /// is can see at a glance who to approach. Allowed off-turn and in the lobby - it is a
+    /// standing notice, not a move - and the resource names are checked against the real set.
+    /// </summary>
+    public async Task SetTradeWishlist(string? wants, string? offers)
+    {
+        var room = CurrentRoom();
+        var me = CurrentPlayerId();
+
+        var entry = room.SetWishlist(me, NormaliseResource(wants), NormaliseResource(offers));
+        await Clients.Group(room.Id).TradeWishlist(entry);
+    }
+
+    /// <summary>Null, or one of the five resource names. Anything else is rejected outright.</summary>
+    private static string? NormaliseResource(string? resource)
+    {
+        if (string.IsNullOrWhiteSpace(resource) || resource == "None")
+        {
+            return null;
+        }
+
+        return Enum.TryParse<ResourceType>(resource, ignoreCase: false, out var parsed)
+            ? parsed.ToString()
+            : throw new HubException("Unknown resource.");
     }
 
     /// <summary>
@@ -341,7 +382,11 @@ public sealed class GameHub : Hub<IGameClient>
         await BroadcastGameState(room, result.State);
     }
 
-    /// <summary>The caller accepts the offer. Identity comes from the connection, never the client.</summary>
+    /// <summary>
+    /// The caller signals they are willing to take the offer. This does not execute the swap:
+    /// the proposer still picks which of the willing players they deal with. Identity comes
+    /// from the connection, never the client.
+    /// </summary>
     public async Task AcceptTrade(string offerId)
     {
         var (room, me) = CurrentActor();
@@ -358,6 +403,39 @@ public sealed class GameHub : Hub<IGameClient>
         }
 
         await Clients.Group(room.Id).TradeResolved(new TradeResolvedDto(id, me, "Accepted"));
+        await BroadcastGameState(room, state);
+    }
+
+    /// <summary>
+    /// The proposer closes the deal with one of the players who accepted. Only the proposer
+    /// may call this, and only naming someone who actually said yes - both enforced in the
+    /// domain, not here.
+    /// </summary>
+    public async Task ConfirmTrade(string offerId, string partnerPlayerId)
+    {
+        var (room, me) = CurrentActor();
+        var id = ParseOfferId(offerId);
+
+        if (!Guid.TryParse(partnerPlayerId, out var partner))
+        {
+            throw new HubException("Invalid trade partner.");
+        }
+
+        (TradeOfferDto Offer, GameStateDto State) result;
+        try
+        {
+            result = room.Game.ConfirmTrade(me, id, partner);
+        }
+        catch (GameRuleException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+
+        var state = result.State;
+        await Clients.Group(room.Id).TradeResolved(new TradeResolvedDto(id, partner, "Confirmed", result.Offer));
+        await Clients.Group(room.Id).SystemMessage(new SystemMessageDto(
+            $"{NameOf(room, me)} traded with {NameOf(room, partner)}.",
+            "good", DateTimeOffset.UtcNow));
         await BroadcastGameState(room, state);
     }
 
@@ -509,6 +587,8 @@ public sealed class GameHub : Hub<IGameClient>
 
         // Every successful move may have handed the clock to someone else.
         _timers.Sync(room);
+        // ...or posted (or closed) an offer whose own 15-second clock needs arming.
+        _tradeTimers.Sync(room);
         // ...or handed the turn (or a trade/discard decision) to a bot.
         _bots.Sync(room);
     }

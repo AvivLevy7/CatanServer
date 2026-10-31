@@ -35,6 +35,16 @@ public static class TradeRates
     public const int ResourceHarbor = 2;
 }
 
+/// <summary>Timings for player-to-player offers.</summary>
+public static class TradeRules
+{
+    /// <summary>
+    /// How long an offer stays on the table before it withdraws itself. Short on purpose:
+    /// an unanswered offer should not be able to stall the game.
+    /// </summary>
+    public static readonly TimeSpan OfferLifetime = TimeSpan.FromSeconds(15);
+}
+
 /// <summary>Standard building costs.</summary>
 public static class BuildingCosts
 {

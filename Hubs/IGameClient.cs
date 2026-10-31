@@ -31,6 +31,9 @@ public interface IGameClient
     /// <summary>A seat started or stopped weighing the live trade offer.</summary>
     Task NegotiationStatus(NegotiationStatusDto status);
 
+    /// <summary>A seat changed what it is advertising as wanted / for sale.</summary>
+    Task TradeWishlist(TradeWishlistDto wishlist);
+
     Task DiceRolled(DiceRolledDto roll);
 
     Task RobberMoved(RobberMovedDto robber);

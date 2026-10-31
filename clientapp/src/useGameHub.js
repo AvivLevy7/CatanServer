@@ -66,6 +66,9 @@ export function useGameHub() {
   const [emotes, setEmotes] = useState({});
   // Who is weighing the live trade offer, as playerId -> 'Inspecting' | 'Countering'.
   const [negotiators, setNegotiators] = useState({});
+  // Standing wants/offers, as playerId -> { wants, offers }. Room state, not ephemeral:
+  // the hub replays them on connect, so a refresh does not lose them.
+  const [wishlists, setWishlists] = useState({});
   // Bumps on every 7 so the screen can replay its vignette; 0 means "no 7 yet".
   const [sevenPulse, setSevenPulse] = useState(0);
   const emoteTimers = useRef(new Map());
@@ -206,6 +209,16 @@ export function useGameHub() {
       );
     });
 
+    connection.on('TradeWishlist', (entry) => {
+      if (cancelled || entry?.playerId == null) return;
+      const { playerId, wants, offers } = entry;
+      setWishlists((prev) =>
+        wants == null && offers == null
+          ? without(prev, playerId)
+          : { ...prev, [playerId]: { wants, offers } },
+      );
+    });
+
     connection.on('NegotiationStatus', (status) => {
       if (cancelled || status?.playerId == null) return;
       const { playerId, activity } = status;
@@ -234,6 +247,7 @@ export function useGameHub() {
         setWinner(null);
         setEmotes({});
         setNegotiators({});
+        setWishlists({});
         setSevenPulse(0);
         setLastRoll(null);
         setRollCinematic(null);
@@ -316,6 +330,7 @@ export function useGameHub() {
       connection.off('SystemMessage');
       connection.off('Emote');
       connection.off('NegotiationStatus');
+      connection.off('TradeWishlist');
       for (const timer of pendingEmoteTimers.values()) clearTimeout(timer);
       pendingEmoteTimers.clear();
       for (const timer of pendingNegotiationTimers.values()) clearTimeout(timer);
@@ -388,7 +403,12 @@ export function useGameHub() {
       invokeMove('ProposeTrade', targetPlayerId ?? null, offered, requested),
     [invokeMove],
   );
+  // Accepting only registers willingness; the proposer then picks who they deal with.
   const acceptTrade = useCallback((offerId) => invokeMove('AcceptTrade', offerId), [invokeMove]);
+  const confirmTrade = useCallback(
+    (offerId, partnerPlayerId) => invokeMove('ConfirmTrade', offerId, partnerPlayerId),
+    [invokeMove],
+  );
   const rejectTrade = useCallback((offerId) => invokeMove('RejectTrade', offerId), [invokeMove]);
   const cancelTrade = useCallback((offerId) => invokeMove('CancelTrade', offerId), [invokeMove]);
   const discardCards = useCallback(
@@ -486,6 +506,12 @@ export function useGameHub() {
     if (connection?.state !== HubConnectionState.Connected) return;
     connection.invoke('SendEmote', emote).catch(() => {});
   }, []);
+  // A standing notice rather than a move, so a failure is not worth an error banner.
+  const setTradeWishlist = useCallback((wants, offers) => {
+    const connection = connectionRef.current;
+    if (connection?.state !== HubConnectionState.Connected) return;
+    connection.invoke('SetTradeWishlist', wants ?? null, offers ?? null).catch(() => {});
+  }, []);
   // Advisory too: never worth an error banner if it does not reach the table.
   const setNegotiationStatus = useCallback((activity) => {
     const connection = connectionRef.current;
@@ -525,8 +551,11 @@ export function useGameHub() {
     tradeWithBank,
     proposeTrade,
     acceptTrade,
+    confirmTrade,
     rejectTrade,
     cancelTrade,
+    wishlists,
+    setTradeWishlist,
     lastTradeResult,
     clearTradeResult: () => setLastTradeResult(null),
     discardCards,

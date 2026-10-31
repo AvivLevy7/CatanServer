@@ -20,9 +20,12 @@ export default function EdgeMarker({
   ownerColor,
   highlighted = false,
   justPlaced = false,
+  // Position of this segment within the Longest Road trail being celebrated, or -1.
+  claimIndex = -1,
   onClick,
 }) {
   const hasRoad = edge.ownerId != null;
+  const claiming = claimIndex >= 0;
 
   // Trim 18% from each end so roads stop short of the corner markers.
   const trim = 0.18;
@@ -63,7 +66,10 @@ export default function EdgeMarker({
             : highlighted
               ? 'animate-pulse stroke-amber-200 stroke-[6] group-hover:stroke-white'
               : 'stroke-white/0 stroke-[6] transition-all duration-150 group-hover:stroke-white/60 group-focus-visible:stroke-white/60'
-        } ${justPlaced ? 'animate-road-snap' : ''}`}
+        } ${justPlaced ? 'animate-road-snap' : ''} ${claiming ? 'animate-road-claim' : ''}`}
+        // Each segment flares a beat after the one before it, so the glow is walked
+        // along the route rather than lit all at once.
+        style={claiming ? { '--road-delay': `${claimIndex * 85}ms` } : undefined}
       />
 
       {/* Dust rises from the middle of the new road. */}

@@ -34,6 +34,15 @@ public interface IGameStateService
 
     (TradeOfferDto Offer, bool Removed, GameStateDto State) RejectTrade(Guid actorId, Guid offerId);
 
+    /// <summary>A bot refuses on principle (the leader embargo), not on the terms.</summary>
+    (TradeOfferDto Offer, bool Removed, GameStateDto State) EmbargoTrade(Guid actorId, Guid offerId);
+
+    /// <summary>The proposer closes the deal with one of the players who accepted.</summary>
+    (TradeOfferDto Offer, GameStateDto State) ConfirmTrade(Guid actorId, Guid offerId, Guid partnerId);
+
+    /// <summary>The offer's clock ran out. Returns null when it had already gone.</summary>
+    GameStateDto? ExpireTrade(Guid offerId);
+
     GameStateDto CancelTrade(Guid actorId, Guid offerId);
 
     /// <summary>After a 7: the actor discards the cards they owe.</summary>
@@ -331,6 +340,33 @@ public sealed class GameStateService : IGameStateService
         }
     }
 
+    public (TradeOfferDto Offer, GameStateDto State) ConfirmTrade(Guid actorId, Guid offerId, Guid partnerId)
+    {
+        lock (_gate)
+        {
+            var offer = _game.ConfirmTrade(actorId, offerId, partnerId);
+            return (ProjectOffer(offer), ProjectGame(_game));
+        }
+    }
+
+    public GameStateDto? ExpireTrade(Guid offerId)
+    {
+        lock (_gate)
+        {
+            return _game.ExpireTrade(offerId) ? ProjectGame(_game) : null;
+        }
+    }
+
+    public (TradeOfferDto Offer, bool Removed, GameStateDto State) EmbargoTrade(Guid actorId, Guid offerId)
+    {
+        lock (_gate)
+        {
+            var offer = _game.ActiveTradeOffer;
+            var removed = _game.EmbargoTrade(actorId, offerId);
+            return (ProjectOffer(offer!), removed, ProjectGame(_game));
+        }
+    }
+
     public (TradeOfferDto Offer, bool Removed, GameStateDto State) RejectTrade(Guid actorId, Guid offerId)
     {
         lock (_gate)
@@ -357,7 +393,10 @@ public sealed class GameStateService : IGameStateService
             offer.TargetPlayerId,
             offer.ResourcesOffered.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
             offer.ResourcesRequested.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
-            offer.DeclinedBy.ToList());
+            offer.DeclinedBy.ToList(),
+            offer.AcceptedBy.ToList(),
+            offer.EmbargoedBy.ToList(),
+            offer.ExpiresAt);
 
     public GameStateDto DiscardCards(Guid actorId, IReadOnlyDictionary<string, int> cards)
     {
@@ -571,7 +610,8 @@ public sealed class GameStateService : IGameStateService
             game.AllowSevens,
             game.HasRolledDice,
             _turnDeadline,
-            new Dictionary<int, int>(game.DiceRollFrequencies));
+            new Dictionary<int, int>(game.DiceRollFrequencies),
+            game.LongestRoadPath.Select(edge => edge.ToString()).ToList());
     }
 
     private static DiceRolledDto ProjectRoll(RollOutcome outcome) =>
@@ -618,7 +658,8 @@ public sealed class GameStateService : IGameStateService
                 AnchorCorner: node.AnchorCorner.ToString(),
                 node.OwnerId,
                 node.Building.ToString(),
-                node.Harbor.ToString()))
+                node.Harbor.ToString(),
+                node.Hexes.Select(hex => $"{hex.Q},{hex.R}").ToList()))
             .ToList();
 
         var edges = board.Edges

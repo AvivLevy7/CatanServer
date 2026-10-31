@@ -1,5 +1,6 @@
 import { RESOURCES } from '../resources';
 import { RESOURCE_STYLE, seat } from '../theme';
+import TradeTimerRing from './TradeTimerRing';
 import { CheckIcon, CounterIcon, CrossIcon } from './icons';
 
 function canAfford(player, bundle) {
@@ -44,11 +45,16 @@ const ACTION_BTN =
  * board and the viewer's own hand stay in sight while they weigh the terms. Actions are
  * icon-only: refuse, counter, accept (accept is withheld on a one-sided offer, which the
  * rules allow as an opening but not as a bargain).
+ *
+ * Accepting does not close the deal. It tells the proposer this seat is willing, and the
+ * proposer picks who they actually trade with - so the panel switches to a waiting state
+ * rather than disappearing. The rim winds down with the offer's own 15-second clock.
  */
 export default function TradeOfferPanel({ offer, sender, recipient, onAccept, onReject, onCounter, disabled }) {
   const affordable = canAfford(recipient, offer.resourcesRequested);
   const oneSided = bundleSize(offer.resourcesOffered) === 0 || bundleSize(offer.resourcesRequested) === 0;
   const s = seat(sender?.color);
+  const iAccepted = (offer.acceptedBy ?? []).includes(recipient?.id);
 
   const note = oneSided
     ? 'Only one side is filled in - counter it or refuse.'
@@ -57,9 +63,13 @@ export default function TradeOfferPanel({ offer, sender, recipient, onAccept, on
       : null;
 
   return (
+    <TradeTimerRing
+      expiresAt={offer.expiresAt}
+      className="pointer-events-auto fixed left-[4.75rem] top-1/2 z-[34] w-[17rem] -translate-y-1/2 max-md:left-[3.25rem] max-md:w-[14.5rem]"
+    >
     <section
       aria-label={`Trade offer from ${sender?.name ?? 'a player'}`}
-      className="animate-glow panel-glass pointer-events-auto fixed left-[4.75rem] top-1/2 z-[34] w-[17rem] -translate-y-1/2 p-3 max-md:left-[3.25rem] max-md:w-[14.5rem] max-md:p-2.5"
+      className="panel-glass w-full p-3 max-md:p-2.5"
     >
       <header className="flex items-center gap-2">
         <span
@@ -105,42 +115,64 @@ export default function TradeOfferPanel({ offer, sender, recipient, onAccept, on
         </p>
       )}
 
-      <div className="mt-3 flex items-center justify-center gap-2.5">
-        <button
-          type="button"
-          onClick={() => onReject(offer.offerId)}
-          disabled={disabled}
-          title="Refuse the offer"
-          aria-label="Refuse the offer"
-          className={`${ACTION_BTN} border-rose-400/60 bg-rose-900/70 text-rose-100 hover:border-rose-300 hover:bg-rose-800/80`}
-        >
-          <CrossIcon className="size-5" />
-        </button>
-        {onCounter && (
+      {iAccepted ? (
+        // Said yes, now waiting on the proposer to pick a partner. Refusing is still
+        // allowed - the deal is not done until they close it.
+        <div className="mt-3 flex items-center gap-2">
+          <span className="flex flex-1 items-center gap-1.5 rounded-lg bg-emerald-900/50 px-2 py-1.5 text-[11px] font-semibold text-emerald-100 ring-1 ring-emerald-400/50">
+            <CheckIcon className="size-4 shrink-0" />
+            Waiting for {sender?.name ?? 'them'} to confirm
+          </span>
           <button
             type="button"
-            onClick={onCounter}
+            onClick={() => onReject(offer.offerId)}
             disabled={disabled}
-            title="Counter with your own terms"
-            aria-label="Counter with your own terms"
-            className={`${ACTION_BTN} border-amber-300/70 bg-amber-400/90 text-ink-900 hover:border-amber-200 hover:bg-amber-300`}
+            title="Change your mind and refuse"
+            aria-label="Change your mind and refuse"
+            className={`${ACTION_BTN} size-9 border-rose-400/60 bg-rose-900/70 text-rose-100 hover:border-rose-300 hover:bg-rose-800/80`}
           >
-            <CounterIcon className="size-5" />
+            <CrossIcon className="size-4" />
           </button>
-        )}
-        {!oneSided && (
+        </div>
+      ) : (
+        <div className="mt-3 flex items-center justify-center gap-2.5">
           <button
             type="button"
-            onClick={() => onAccept(offer.offerId)}
-            disabled={disabled || !affordable}
-            title={affordable ? 'Accept the offer' : 'You lack the requested goods'}
-            aria-label="Accept the offer"
-            className={`${ACTION_BTN} border-emerald-300/70 bg-emerald-700/90 text-emerald-50 hover:border-emerald-200 hover:bg-emerald-600`}
+            onClick={() => onReject(offer.offerId)}
+            disabled={disabled}
+            title="Refuse the offer"
+            aria-label="Refuse the offer"
+            className={`${ACTION_BTN} border-rose-400/60 bg-rose-900/70 text-rose-100 hover:border-rose-300 hover:bg-rose-800/80`}
           >
-            <CheckIcon className="size-5" />
+            <CrossIcon className="size-5" />
           </button>
-        )}
-      </div>
+          {onCounter && (
+            <button
+              type="button"
+              onClick={onCounter}
+              disabled={disabled}
+              title="Counter with your own terms"
+              aria-label="Counter with your own terms"
+              className={`${ACTION_BTN} border-amber-300/70 bg-amber-400/90 text-ink-900 hover:border-amber-200 hover:bg-amber-300`}
+            >
+              <CounterIcon className="size-5" />
+            </button>
+          )}
+          {!oneSided && (
+            <button
+              type="button"
+              onClick={() => onAccept(offer.offerId)}
+              disabled={disabled || !affordable}
+              title={affordable ? "Tell them you are in - they choose who to trade with" : 'You lack the requested goods'}
+              aria-label="Accept the offer"
+              className={`${ACTION_BTN} border-emerald-300/70 bg-emerald-700/90 text-emerald-50 hover:border-emerald-200 hover:bg-emerald-600`}
+            >
+              <CheckIcon className="size-5" />
+            </button>
+          )}
+        </div>
+      )}
     </section>
+    </TradeTimerRing>
   );
 }

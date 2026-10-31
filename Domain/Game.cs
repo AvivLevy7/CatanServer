@@ -99,6 +99,13 @@ public sealed class Game
     /// <summary>Length of the record holder's road when they claimed it; the bar to beat.</summary>
     public int LongestRoadLength { get; private set; }
 
+    /// <summary>
+    /// The edges making up <see cref="LongestRoadHolderId"/>'s winning trail, in order.
+    /// Empty when nobody holds the title. Recomputed whenever the title is reassessed, so
+    /// projecting the state stays cheap.
+    /// </summary>
+    public IReadOnlyList<EdgeId> LongestRoadPath { get; private set; } = [];
+
     /// <summary>Longest continuous road per player, recomputed after each change.</summary>
     public IReadOnlyDictionary<Guid, int> RoadLengths => _roadLengths;
 
@@ -566,14 +573,21 @@ public sealed class Game
             throw new GameRuleException("You do not have the resources you are offering.");
         }
 
-        ActiveTradeOffer = new TradeOffer(senderId, targetId, give, get);
+        ActiveTradeOffer = new TradeOffer(
+            senderId,
+            targetId,
+            give,
+            get,
+            DateTimeOffset.UtcNow + TradeRules.OfferLifetime);
         return ActiveTradeOffer;
     }
 
     /// <summary>
-    /// <paramref name="accepterId"/> accepts the outstanding offer. Both sides are re-checked
-    /// because hands may have changed since the offer was made. A one-sided offer cannot be
-    /// accepted at all - it is only an opening of negotiations, to be countered or declined.
+    /// <paramref name="accepterId"/> says yes to the outstanding offer. This does <em>not</em>
+    /// execute the swap: it records them as a willing partner and leaves the proposer to pick
+    /// who they actually deal with (see <see cref="ConfirmTrade"/>). Affordability is checked
+    /// here as a courtesy so nobody signals interest they cannot back, and again on confirm,
+    /// because hands can change in between.
     /// </summary>
     public TradeOffer AcceptTrade(Guid accepterId, Guid offerId)
     {
@@ -590,25 +604,75 @@ public sealed class Game
             throw new GameRuleException("A one-sided offer cannot be accepted - counter it with your terms.");
         }
 
-        var sender = GetPlayer(offer.SenderPlayerId);
-        var accepter = GetPlayer(accepterId);
-
-        if (!sender.CanAfford(offer.ResourcesOffered))
-        {
-            ActiveTradeOffer = null;
-            throw new GameRuleException($"{sender.Name} no longer has the offered resources.");
-        }
-
-        if (!accepter.CanAfford(offer.ResourcesRequested))
+        if (!GetPlayer(accepterId).CanAfford(offer.ResourcesRequested))
         {
             throw new GameRuleException("You do not have the requested resources.");
         }
 
+        offer.Accept(accepterId);
+        return offer;
+    }
+
+    /// <summary>
+    /// A recipient refuses on principle rather than on the terms - the bots' embargo of a
+    /// player within reach of winning. Counts as a decline for the purpose of clearing the
+    /// offer, but is reported separately so the proposer can see that no counter will help.
+    /// </summary>
+    public bool EmbargoTrade(Guid embargoerId, Guid offerId)
+    {
+        var offer = RequireOffer(offerId);
+
+        if (!offer.IsAddressedTo(embargoerId))
+        {
+            throw new GameRuleException("This offer was not made to you.");
+        }
+
+        offer.Embargo(embargoerId);
+        return ClearIfExhausted(offer);
+    }
+
+    /// <summary>
+    /// The proposer closes the deal with one of the players who accepted. Both hands are
+    /// re-checked at this point, because the whole table has been free to trade with the bank,
+    /// discard or build since the offer went out.
+    /// </summary>
+    public TradeOffer ConfirmTrade(Guid senderId, Guid offerId, Guid partnerId)
+    {
+        RequireMainGame();
+        var offer = RequireOffer(offerId);
+
+        if (offer.SenderPlayerId != senderId)
+        {
+            throw new GameRuleException("Only the proposer can close the deal.");
+        }
+
+        if (!offer.AcceptedBy.Contains(partnerId))
+        {
+            throw new GameRuleException("That player has not accepted your offer.");
+        }
+
+        var sender = GetPlayer(senderId);
+        var partner = GetPlayer(partnerId);
+
+        if (!sender.CanAfford(offer.ResourcesOffered))
+        {
+            ActiveTradeOffer = null;
+            throw new GameRuleException("You no longer have the resources you offered.");
+        }
+
+        if (!partner.CanAfford(offer.ResourcesRequested))
+        {
+            // Their hand moved on; drop them from the deal but leave the offer standing for
+            // anyone else who said yes.
+            offer.Decline(partnerId);
+            throw new GameRuleException($"{partner.Name} no longer has the requested resources.");
+        }
+
         sender.Pay(offer.ResourcesOffered);
-        accepter.Pay(offer.ResourcesRequested);
+        partner.Pay(offer.ResourcesRequested);
         foreach (var (type, amount) in offer.ResourcesOffered)
         {
-            accepter.AddResources(type, amount);
+            partner.AddResources(type, amount);
         }
 
         foreach (var (type, amount) in offer.ResourcesRequested)
@@ -618,6 +682,18 @@ public sealed class Game
 
         ActiveTradeOffer = null;
         return offer;
+    }
+
+    /// <summary>The offer outstayed its welcome. Silently clears it; no-op if it is already gone.</summary>
+    public bool ExpireTrade(Guid offerId)
+    {
+        if (ActiveTradeOffer is not { } offer || offer.OfferId != offerId)
+        {
+            return false;
+        }
+
+        ActiveTradeOffer = null;
+        return true;
     }
 
     /// <summary>
@@ -634,16 +710,24 @@ public sealed class Game
         }
 
         offer.Decline(rejecterId);
+        return ClearIfExhausted(offer);
+    }
 
-        var everyoneDeclined = !offer.IsOpen
+    /// <summary>
+    /// Drops the offer once there is nobody left who might say yes: a targeted offer dies on
+    /// its one refusal, an open one once every opponent has turned it down.
+    /// </summary>
+    private bool ClearIfExhausted(TradeOffer offer)
+    {
+        var exhausted = !offer.IsOpen
             || _players.All(p => p.Id == offer.SenderPlayerId || offer.DeclinedBy.Contains(p.Id));
 
-        if (everyoneDeclined)
+        if (exhausted)
         {
             ActiveTradeOffer = null;
         }
 
-        return everyoneDeclined;
+        return exhausted;
     }
 
     /// <summary>The proposer withdraws their own offer.</summary>
@@ -1269,6 +1353,7 @@ public sealed class Game
                 holder.RevokeVictoryPoints(Achievements.BonusVictoryPoints);
                 LongestRoadHolderId = null;
                 LongestRoadLength = 0;
+                LongestRoadPath = [];
                 holder = null;
             }
             else
@@ -1286,6 +1371,7 @@ public sealed class Game
 
         if (contenders.Count == 0)
         {
+            LongestRoadPath = holder is null ? [] : LongestRoadTrail(holder.Id);
             return;
         }
 
@@ -1293,6 +1379,7 @@ public sealed class Game
         if (holder is null && contenders.Count > 1
             && _roadLengths[contenders[0].Id] == _roadLengths[contenders[1].Id])
         {
+            LongestRoadPath = [];
             return;
         }
 
@@ -1301,6 +1388,73 @@ public sealed class Game
         challenger.AwardVictoryPoints(Achievements.BonusVictoryPoints);
         LongestRoadHolderId = challenger.Id;
         LongestRoadLength = _roadLengths[challenger.Id];
+        LongestRoadPath = LongestRoadTrail(challenger.Id);
+    }
+
+    /// <summary>
+    /// The actual edges of <paramref name="playerId"/>'s longest trail, not just its length.
+    /// Same walk as <see cref="LongestRoadFor"/>, carrying the route along so the board can
+    /// trace it. Ties are broken arbitrarily - any longest trail is as true as another.
+    /// </summary>
+    public IReadOnlyList<EdgeId> LongestRoadTrail(Guid playerId)
+    {
+        var ownEdges = Board.Edges.Where(e => e.OwnerId == playerId).ToList();
+        if (ownEdges.Count == 0)
+        {
+            return [];
+        }
+
+        var best = new List<EdgeId>();
+        var visited = new HashSet<EdgeId>();
+        var trail = new List<EdgeId>();
+
+        foreach (var start in ownEdges)
+        {
+            visited.Add(start.Id);
+            trail.Add(start.Id);
+            Extend(start.Second, start.First);
+            Extend(start.First, start.Second);
+            trail.RemoveAt(trail.Count - 1);
+            visited.Remove(start.Id);
+        }
+
+        return best;
+
+        void Extend(NodeId cameFrom, NodeId at)
+        {
+            if (trail.Count > best.Count)
+            {
+                best = [.. trail];
+            }
+
+            var node = Board.GetNode(at);
+
+            // An opponent's building blocks the road at this intersection.
+            if (node.IsOccupied && node.OwnerId != playerId)
+            {
+                return;
+            }
+
+            foreach (var edgeId in node.Edges)
+            {
+                if (visited.Contains(edgeId))
+                {
+                    continue;
+                }
+
+                var edge = Board.GetEdge(edgeId);
+                if (edge.OwnerId != playerId)
+                {
+                    continue;
+                }
+
+                visited.Add(edgeId);
+                trail.Add(edgeId);
+                Extend(at, edge.Other(at));
+                trail.RemoveAt(trail.Count - 1);
+                visited.Remove(edgeId);
+            }
+        }
     }
 
     /// <summary>

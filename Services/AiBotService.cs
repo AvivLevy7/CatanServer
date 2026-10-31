@@ -30,18 +30,27 @@ public sealed class AiBotService
     private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly RoomManager _rooms;
     private readonly TurnTimerService _timers;
+    private readonly TradeTimerService _tradeTimers;
     private readonly IHubContext<GameHub, IGameClient> _hub;
     private readonly ILogger<AiBotService> _logger;
 
-    public AiBotService(RoomManager rooms, TurnTimerService timers, IHubContext<GameHub, IGameClient> hub, ILogger<AiBotService> logger)
+    public AiBotService(
+        RoomManager rooms,
+        TurnTimerService timers,
+        TradeTimerService tradeTimers,
+        IHubContext<GameHub, IGameClient> hub,
+        ILogger<AiBotService> logger)
     {
         _rooms = rooms;
         _timers = timers;
+        _tradeTimers = tradeTimers;
         _hub = hub;
         _logger = logger;
 
         // Timeouts can hand the turn to a bot without going through the hub.
         _timers.Resolved += Sync;
+        // So can an offer expiring, which frees the proposer to act again.
+        _tradeTimers.Expired += Sync;
     }
 
     /// <summary>Wake the bot loop for this room. Cheap and idempotent; safe to call after every move.</summary>
@@ -203,6 +212,7 @@ public sealed class AiBotService
         }
 
         _timers.Sync(room);
+        _tradeTimers.Sync(room);
     }
 }
 
@@ -486,6 +496,21 @@ internal static class BotBrain
     private static readonly ConcurrentDictionary<(string Room, Guid Bot), int> LastProposalTurn = new();
 
     /// <summary>
+    /// From this many victory points, the bots stop trading with you altogether. Two points
+    /// from a win is the moment the table should gang up, and a bot that keeps handing the
+    /// leader its last ore is not playing to win.
+    /// </summary>
+    public const int EmbargoVictoryPoints = 8;
+
+    /// <summary>
+    /// Points anyone at the table can see: the total less any hidden victory-point cards.
+    /// The bots read the same full state the server holds, so without this they would be
+    /// embargoing on cards no human could know about.
+    /// </summary>
+    private static int PublicVictoryPoints(PlayerDto player) =>
+        player.VictoryPoints - (player.VictoryPointBreakdown?.VictoryPointCards ?? 0);
+
+    /// <summary>
     /// Accept when the cards received are worth more to us than the cards given: resources we
     /// are missing for our next build count high, surplus copies count low, and we never give
     /// away something the next build needs. A one-sided offer is never accepted (the rules
@@ -493,6 +518,18 @@ internal static class BotBrain
     /// </summary>
     private static BotPlan AnswerTrade(GameStateDto state, BoardGraph board, RoomMember bot, TradeOfferDto offer, (GamePhase, Guid, bool, int) key)
     {
+        // The leader gets nothing, whatever the terms. Reported as an embargo rather than a
+        // plain decline so the proposer can see that a sweeter offer will not help.
+        var proposer = state.Players.FirstOrDefault(p => p.Id == offer.SenderPlayerId);
+        if (proposer is not null && PublicVictoryPoints(proposer) >= EmbargoVictoryPoints)
+        {
+            return new BotPlan(bot.Name, "embargo trade", $"refuses to trade with {proposer.Name}, who is close to winning", AiBotService.ThinkDelay, key, IsFallbackSafe: true, game =>
+            {
+                var (_, removed, newState) = game.EmbargoTrade(bot.Id, offer.OfferId);
+                return new BotMoveResult(newState, null, null, new TradeResolvedDto(offer.OfferId, bot.Id, removed ? "Embargoed" : "Embargo"));
+            });
+        }
+
         var hand = state.Players.First(p => p.Id == bot.Id).Resources ?? new Dictionary<string, int>();
         var (_, missing, cost) = NextGoal(state, board, bot.Id);
         var oneSided = offer.ResourcesOffered.Count == 0 || offer.ResourcesRequested.Count == 0;
@@ -504,7 +541,8 @@ internal static class BotBrain
 
         if (accept)
         {
-            return new BotPlan(bot.Name, "accept trade", "accepts the trade", AiBotService.ThinkDelay, key, IsFallbackSafe: true, game =>
+            // Only a willingness: the proposer still picks who they deal with.
+            return new BotPlan(bot.Name, "accept trade", "is willing to take the trade", AiBotService.ThinkDelay, key, IsFallbackSafe: true, game =>
             {
                 var (_, newState) = game.AcceptTrade(bot.Id, offer.OfferId);
                 return new BotMoveResult(newState, null, null, new TradeResolvedDto(offer.OfferId, bot.Id, "Accepted"));
@@ -612,15 +650,33 @@ internal static class BotBrain
             });
     }
 
-    /// <summary>Nobody took the offer within the window: withdraw it and carry on with the turn.</summary>
+    /// <summary>
+    /// The bot's own offer is on the table. Since accepting only registers interest, a bot
+    /// proposer has to close its own deal: it waits a beat, then trades with whoever said yes
+    /// - skipping anyone near a win, under the same embargo it applies to its own trades - and
+    /// withdraws the offer if nobody did.
+    /// </summary>
     private static BotPlan AwaitOwnOffer(RoomMember bot, TradeOfferDto offer, (GamePhase, Guid, bool, int) key) =>
-        new(bot.Name, "withdraw trade", "withdraws the offer", AiBotService.OfferWindow, key, IsFallbackSafe: true, game =>
+        new(bot.Name, "settle own trade", "settles its offer", AiBotService.OfferWindow, key, IsFallbackSafe: true, game =>
         {
             var current = game.GetGameState();
             if (current.ActiveTradeOffer?.OfferId != offer.OfferId)
             {
-                // Already accepted or declined by everyone while we waited.
+                // Expired, or declined by everyone, while we waited.
                 return new BotMoveResult(current, null, null, null) { Silent = true };
+            }
+
+            var live = current.ActiveTradeOffer;
+            var partner = live.AcceptedBy
+                .Select(id => current.Players.FirstOrDefault(p => p.Id == id))
+                .Where(p => p is not null && PublicVictoryPoints(p) < EmbargoVictoryPoints)
+                .OrderBy(p => PublicVictoryPoints(p!))
+                .FirstOrDefault();
+
+            if (partner is not null)
+            {
+                var (settled, tradedState) = game.ConfirmTrade(bot.Id, offer.OfferId, partner.Id);
+                return new BotMoveResult(tradedState, null, null, new TradeResolvedDto(offer.OfferId, partner.Id, "Confirmed", settled));
             }
 
             var newState = game.CancelTrade(bot.Id, offer.OfferId);

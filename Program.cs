@@ -31,6 +31,8 @@ builder.Services.AddSignalR();
 builder.Services.AddSingleton<RoomManager>();
 // Per-room turn clocks (AFK protection); needs IHubContext so it must be a singleton.
 builder.Services.AddSingleton<TurnTimerService>();
+// Per-room trade clocks; withdraws an offer nobody closed in time.
+builder.Services.AddSingleton<TradeTimerService>();
 // Computer players; drives bot seats off the same game service and broadcasts.
 builder.Services.AddSingleton<AiBotService>();
 

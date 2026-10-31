@@ -508,3 +508,184 @@ body,
     display: none;
   }
 }
+
+/* ===================================================================== */
+/* Trading ecosystem and board micro-interactions                        */
+/* ===================================================================== */
+
+/* ---- Auto-expiring trade offers ---- */
+
+/* A real sweep around the widget's border, not a bar stuck on one edge: a conic
+   gradient fills a 2px frame and the filled angle is wound back to zero. The angle has
+   to be registered with @property, or it would jump between keyframes instead of
+   interpolating. */
+@property --sweep {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 100%;
+}
+
+@keyframes trade-deplete {
+  from { --sweep: 100%; }
+  to { --sweep: 0%; }
+}
+
+/* The frame itself. The widget inside paints its own background over the middle, so only
+   the 2px rim shows. Duration and a negative delay are set inline, which seeks the
+   animation to wherever the offer's own clock has got to - so a panel opened late picks
+   the sweep up mid-flight instead of restarting it. */
+.trade-ring {
+  --sweep: 100%;
+  padding: 2px;
+  border-radius: 1.05rem;
+  background:
+    conic-gradient(
+      from -90deg,
+      rgba(245, 190, 90, 0.95) var(--sweep),
+      rgba(120, 53, 15, 0.35) 0
+    );
+  animation: trade-deplete linear both;
+}
+
+/* Running out: the rim turns to warning colours for the last breath. */
+.trade-ring-urgent {
+  background:
+    conic-gradient(
+      from -90deg,
+      rgba(251, 113, 133, 0.95) var(--sweep),
+      rgba(76, 5, 25, 0.4) 0
+    );
+}
+
+/* ---- Live opponent trade status ---- */
+
+/* "Still reading": three dots breathing in sequence. */
+@keyframes status-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.7); }
+  40% { opacity: 1; transform: scale(1); }
+}
+.animate-status-dot {
+  animation: status-dot 1.25s ease-in-out infinite;
+}
+
+/* A fresh yes lands with a bump, so the proposer notices it arrive. */
+@keyframes status-in {
+  0% { opacity: 0; transform: scale(0.4); }
+  60% { opacity: 1; transform: scale(1.25); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-status-in {
+  animation: status-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+/* A row the proposer can close the deal on: a slow gold shimmer that says "click me". */
+@keyframes partner-ready {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); }
+  50% { box-shadow: 0 0 14px 3px rgba(52, 211, 153, 0.08); }
+}
+.animate-partner-ready {
+  animation: partner-ready 1.8s ease-in-out infinite;
+}
+
+/* ---- Build preview: cards about to be spent ---- */
+
+/* Paired with -translate-y-3 on the card itself; this is just the glow around it. */
+.card-earmarked {
+  box-shadow:
+    0 0 0 2px rgba(253, 230, 138, 0.9),
+    0 10px 22px rgba(0, 0, 0, 0.65),
+    0 0 20px rgba(245, 190, 90, 0.55);
+}
+
+/* ---- Port conversion badge ---- */
+
+@keyframes port-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.animate-port-bob {
+  animation: port-bob 2s ease-in-out infinite;
+}
+
+/* ---- Wanted / for sale tags ---- */
+
+@keyframes wish-pop {
+  0% { opacity: 0; transform: scale(0.3) translateY(4px); }
+  65% { opacity: 1; transform: scale(1.2) translateY(0); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-wish-pop {
+  animation: wish-pop 0.3s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+/* ---- Mini event feed ---- */
+
+/* Each line slides in from the side, holds, then fades out on its own. The hold is most
+   of the duration, so the feed reads as a settled list rather than a constant shuffle. */
+@keyframes mini-log-life {
+  0% { opacity: 0; transform: translateX(-14px) scale(0.94); }
+  8% { opacity: 1; transform: translateX(0) scale(1); }
+  78% { opacity: 1; transform: translateX(0) scale(1); }
+  100% { opacity: 0; transform: translateX(-10px) scale(0.97); }
+}
+.animate-mini-log {
+  animation: mini-log-life var(--life, 5s) ease-out both;
+}
+
+/* ---- Longest Road claim ---- */
+
+/* Each segment of the winning trail flares gold in turn, so the eye is walked along the
+   route rather than shown it all at once. --road-delay staggers them by position. */
+@keyframes road-claim {
+  0% {
+    stroke: var(--road-base, #f5be5a);
+    filter: none;
+  }
+  35% {
+    stroke: #fff7e0;
+    filter: drop-shadow(0 0 10px rgba(253, 230, 138, 1));
+  }
+  70% {
+    stroke: #fde68a;
+    filter: drop-shadow(0 0 7px rgba(253, 230, 138, 0.8));
+  }
+  100% {
+    stroke: var(--road-base, #f5be5a);
+    filter: none;
+  }
+}
+.animate-road-claim {
+  animation: road-claim 0.9s ease-out var(--road-delay, 0s) both;
+}
+
+/* ---- Setup-phase pip hints ---- */
+
+/* The probability ring on an empty intersection fades up with the board rather than
+   snapping in, so the setup board does not flash when it first renders. */
+@keyframes pip-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-pip-in {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pip-in 0.3s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trade-ring,
+  .animate-status-dot,
+  .animate-status-in,
+  .animate-partner-ready,
+  .animate-port-bob,
+  .animate-wish-pop,
+  .animate-road-claim,
+  .animate-pip-in {
+    animation: none;
+  }
+  /* The feed still needs to clear itself, so it keeps its timing and loses only the
+     movement - otherwise old lines would pile up forever. */
+  .animate-mini-log {
+    animation: mini-log-life var(--life, 5s) steps(1, end) both;
+  }
+}

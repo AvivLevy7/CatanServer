@@ -8,7 +8,12 @@ import FullscreenButton from './components/FullscreenButton';
 import CardHand from './components/CardHand';
 import SideDrawer from './components/SideDrawer';
 import { MonopolyModal, YearOfPlentyModal } from './components/DevCardModals';
+import BuildMenu from './components/BuildMenu';
 import DiscardModal from './components/DiscardModal';
+import MiniLog, { MINI_LOG_LIFE_MS } from './components/MiniLog';
+import OfferStatusPanel from './components/OfferStatusPanel';
+import WishlistTag from './components/WishlistTag';
+import { tradeStatusOf } from './tradeStatus';
 import EmoteBubbleLayer from './components/EmoteBubbleLayer';
 import EmoteWheel from './components/EmoteWheel';
 import FlyingResources from './components/FlyingResources';
@@ -25,8 +30,12 @@ import TurnTimer from './components/TurnTimer';
 import { LandingPage, WaitingRoom } from './components/Lobby';
 import { useGameHub } from './useGameHub';
 import { usePlacementImpact } from './usePlacementImpact';
-import { ExitIcon } from './components/icons';
+import { BUILD_BY_ID, canAfford } from './buildCosts';
+import { useRoadClaim } from './useRoadClaim';
+import { useMiniLog } from './useMiniLog';
+import { ArrowRightIcon, ExitIcon, HammerIcon } from './components/icons';
 import { sound } from './audio';
+import { RESOURCE_STYLE } from './theme';
 
 const RESOURCE_LABELS = {
   Forest: 'Lumber',
@@ -46,17 +55,18 @@ const HEX_HIGHLIGHT_MS = 1500;
 // At most this many icons fly per grant, so a city on a double hex does not spray the screen.
 const MAX_FLIGHT_ICONS_PER_GRANT = 3;
 
-// Standard building costs, mirrored from Domain/GameRules.cs. Used only to decide whether
-// the End Turn button should nudge the player: the server remains the authority on legality.
-const BUILD_COSTS = {
-  road: { Lumber: 1, Brick: 1 },
-  settlement: { Lumber: 1, Brick: 1, Grain: 1, Wool: 1 },
-  city: { Grain: 2, Ore: 3 },
-  developmentCard: { Ore: 1, Grain: 1, Wool: 1 },
-};
+// Costs are shared with the build menu and the "ask for what I'm missing" shortcut; the
+// server remains the only authority on whether a build is actually legal.
+const BUILD_COSTS = Object.fromEntries(
+  Object.entries(BUILD_BY_ID).map(([id, build]) => [id, build.cost]),
+);
 
-const canAfford = (resources, cost) =>
-  Object.entries(cost).every(([key, amount]) => (resources?.[key] ?? 0) >= amount);
+/** A resource bundle as bare glyphs, for the icon-only feed. */
+const glyphsFor = (bundle) =>
+  Object.entries(bundle ?? {})
+    .filter(([, amount]) => amount > 0)
+    .flatMap(([key, amount]) => Array.from({ length: amount }, () => RESOURCE_STYLE[key]?.glyph ?? '?'))
+    .join('');
 
 const STATUS_LABELS = {
   connecting: 'Connecting to server...',
@@ -143,6 +153,9 @@ export default function App() {
     setNegotiationStatus,
     sevenPulse,
     lastRobbery,
+    confirmTrade,
+    wishlists,
+    setTradeWishlist,
   } = useGameHub();
   const [selected, setSelected] = useState(null);
   // Robber destination awaiting a steal-target choice.
@@ -159,6 +172,14 @@ export default function App() {
   const [flightBurst, setFlightBurst] = useState(null);
   // Victim chosen, now picking a face-down card: { hexId, victimId, priorRobbery }.
   const [pendingSteal, setPendingSteal] = useState(null);
+  // Build palette open state, and the cost bundle its hovered row is previewing.
+  const [buildMenuOpen, setBuildMenuOpen] = useState(false);
+  const [buildPreview, setBuildPreview] = useState(null);
+  // A build the player has chosen and is now placing on the board. Keeps its cards lifted
+  // the whole time, so the price stays visible while they pick a spot.
+  const [armedBuild, setArmedBuild] = useState(null);
+  // Cards the player was short of, carried into the trade desk's "requesting" side.
+  const [tradePrefill, setTradePrefill] = useState(null);
   // Do not disturb: incoming offers are declined on arrival instead of asking.
   const [blockTrades, setBlockTrades] = useState(() => localStorage.getItem(BLOCK_TRADES_KEY) === '1');
   const toggleBlockTrades = () =>
@@ -266,6 +287,16 @@ export default function App() {
   // so every seat sees every placement, bots included.
   const placementImpact = usePlacementImpact(juiceNodes, juiceEdges, restartCount);
 
+  // The Longest Road trail to light up, for the couple of seconds after it changes hands.
+  const roadClaimPath = useRoadClaim(
+    game?.longestRoadHolderId ?? null,
+    game?.longestRoadPath,
+    restartCount,
+  );
+
+  // Glanceable feed of the last few events, in icons rather than sentences.
+  const miniLog = useMiniLog(MINI_LOG_LIFE_MS);
+
   // A roll resolving lights the matching hexes and sends their goods flying to whoever
   // collected them. Both are keyed off a monotonic id so a fast follow-up roll cannot
   // have its highlight cleared by the previous roll's timer.
@@ -313,6 +344,78 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastRoll]);
 
+  // Rolls, in the feed as a die and a number.
+  useEffect(() => {
+    if (!lastRoll) return;
+    const total = lastRoll.roll?.total ?? lastRoll.roll ?? null;
+    if (total == null) return;
+    miniLog.push({
+      playerId: lastRoll.rolledBy,
+      playerName: nameOf(lastRoll.rolledBy),
+      parts: (
+        <>
+          <span aria-hidden="true">{'\u{1F3B2}'}</span>
+          <span className={`font-display font-black tabular-nums ${total === 7 ? 'text-rose-300' : ''}`}>
+            {total}
+          </span>
+        </>
+      ),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastRoll]);
+
+  // Completed trades, as the two bundles passing each other. The terms ride along on the
+  // resolution event, because by the time it lands the offer itself has been cleared.
+  useEffect(() => {
+    if (lastTradeResult?.outcome !== 'Confirmed') return;
+    const terms = lastTradeResult.offer;
+    if (!terms) return;
+    miniLog.push({
+      playerId: terms.senderPlayerId,
+      playerName: nameOf(terms.senderPlayerId),
+      parts: (
+        <>
+          <span aria-hidden="true">{glyphsFor(terms.resourcesOffered)}</span>
+          <ArrowRightIcon className="size-3.5 shrink-0 text-amber-300" />
+          <span aria-hidden="true">{glyphsFor(terms.resourcesRequested)}</span>
+          <span className="truncate font-display text-[10px] font-bold">
+            {nameOf(lastTradeResult.byPlayerId)}
+          </span>
+        </>
+      ),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastTradeResult]);
+
+  // Buildings going up, from the same diff that drives the placement animation.
+  const lastImpact = useRef({ nodes: 0, edges: 0 });
+  useEffect(() => {
+    const nodeCount = placementImpact.nodes.size;
+    const edgeCount = placementImpact.edges.size;
+    const grew = nodeCount > lastImpact.current.nodes || edgeCount > lastImpact.current.edges;
+    lastImpact.current = { nodes: nodeCount, edges: edgeCount };
+    if (!grew) return;
+
+    const builderId =
+      (juiceNodes ?? []).find((n) => placementImpact.nodes.has(n.id))?.ownerId ??
+      (juiceEdges ?? []).find((e) => placementImpact.edges.has(e.id))?.ownerId ??
+      null;
+    if (builderId == null) return;
+
+    miniLog.push({
+      playerId: builderId,
+      playerName: nameOf(builderId),
+      parts: <HammerIcon className="size-3.5 text-amber-200" />,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placementImpact]);
+
+  // A new round clears the feed with everything else.
+  useEffect(() => {
+    if (restartCount > 0) miniLog.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restartCount]);
+
   // Tell the table when this seat is reading an offer or drafting a counter. Only
   // transitions are sent, so the hub is not spammed on every unrelated re-render.
   const lastNegotiationRef = useRef('None');
@@ -324,6 +427,16 @@ export default function App() {
     lastNegotiationRef.current = activity;
     setNegotiationStatus(activity);
   }, [counterDeskOpen, inspectingOffer, setNegotiationStatus]);
+
+  // Escape drops an armed build without placing it.
+  useEffect(() => {
+    if (!armedBuild) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setArmedBuild(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [armedBuild]);
 
   const isLive = status === 'connected';
 
@@ -472,6 +585,40 @@ export default function App() {
   const offerSender = players.find((p) => p.id === activeOffer?.senderPlayerId) ?? null;
   const opponents = players.filter((p) => p.id !== myPlayerId);
 
+  // My own live offer, which I now have to close myself by picking a partner.
+  const myLiveOffer = activeOffer?.senderPlayerId === myPlayerId ? activeOffer : null;
+
+  // Where every seat stands on the live offer, for the badges on the top chips.
+  const tradeStatuses = Object.fromEntries(
+    players.map((p) => [p.id, tradeStatusOf({ playerId: p.id, offer: activeOffer, negotiators })]),
+  );
+
+  // Harbour conversions are a bank trade, so they follow the same rules as one.
+  const myWishlist = wishlists[myPlayerId] ?? {};
+
+  const openTradeDeskFor = (missing) => {
+    setTradePrefill(missing && Object.keys(missing).length > 0 ? missing : null);
+    setTradeOpenTurn(game?.turnNumber ?? 0);
+  };
+
+  // A build the player can pay for enters placement mode (the board is the control for
+  // road/settlement/city); one they cannot opens the trade desk asking for the difference.
+  const handleBuildChoice = (buildId) => {
+    if (buildId === 'developmentCard') {
+      setArmedBuild(null);
+      buyDevelopmentCard();
+      return;
+    }
+    // Roads, settlements and cities are placed by clicking the board, so choosing one here
+    // arms it: the banner says where to click and the cards that will pay stay raised.
+    setSelected(null);
+    setArmedBuild(buildId);
+  };
+
+
+  // Cards to hold up: whatever the menu is hovering, else whatever is armed.
+  const earmarkedCards = buildPreview ?? (armedBuild ? BUILD_COSTS[armedBuild] : null);
+
   const handleNodeClick = (node) => {
     if (!canAct) return;
     if (isSetup) {
@@ -482,8 +629,10 @@ export default function App() {
     if (!hasRolled) return;
 
     if (node.building === 'None') {
+      setArmedBuild(null);
       buildSettlement(node.id);
     } else if (node.building === 'Settlement' && node.ownerId === myPlayerId) {
+      setArmedBuild(null);
       buildCity(node.id);
     }
   };
@@ -494,6 +643,7 @@ export default function App() {
     if (isSetup) {
       placeInitialRoad(edge.id);
     } else if (isPlacingFreeRoads || (isMainGame && hasRolled)) {
+      setArmedBuild(null);
       buildRoad(edge.id);
     }
   };
@@ -578,6 +728,8 @@ export default function App() {
             producingHexIds={producingRoll?.hexIds}
             placedNodeIds={placementImpact.nodes}
             placedEdgeIds={placementImpact.edges}
+            roadClaimPath={roadClaimPath}
+            showPips={isSetup}
           />
         </ZoomableBoard>
       </div>
@@ -595,6 +747,8 @@ export default function App() {
             longestRoadHolderId={game?.longestRoadHolderId}
             pendingDiscards={pendingDiscards}
             negotiators={negotiators}
+            wishlists={wishlists}
+            tradeStatuses={tradeStatuses}
           />
         ) : (
           <p className="panel-glass pointer-events-auto rounded-lg px-3 py-1 text-xs italic text-parchment-300">
@@ -658,6 +812,21 @@ export default function App() {
           </button>
         )}
 
+        {/* Armed build: say where to click, and offer a way out that is not the keyboard. */}
+        {armedBuild && BUILD_BY_ID[armedBuild] && (
+          <button
+            type="button"
+            onClick={() => setArmedBuild(null)}
+            className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-emerald-300/70 bg-emerald-900/90 px-3 py-1 text-xs font-semibold text-emerald-50 shadow-xl backdrop-blur"
+          >
+            <span className="truncate">
+              {BUILD_BY_ID[armedBuild].label}: {BUILD_BY_ID[armedBuild].hint}
+            </span>
+            <span aria-hidden="true" className="text-emerald-300">&times;</span>
+            <span className="sr-only">Cancel this build</span>
+          </button>
+        )}
+
         {selected && (
           <span className="pointer-events-none rounded-full border border-amber-700/50 bg-gray-900/85 px-2.5 py-0.5 text-[11px] italic text-parchment-200 shadow-lg backdrop-blur-md">
             {selected.type} / {RESOURCE_LABELS[selected.type]}
@@ -667,6 +836,40 @@ export default function App() {
       </div>
 
       {/* ---- Right dock: roll, trade, buy, end turn ---- */}
+      {/* Build palette, wanted/for-sale notice and the glanceable feed. */}
+      <div className="pointer-events-none fixed right-3 top-[calc(50%+9.5rem)] z-30 max-md:right-[max(0.375rem,env(safe-area-inset-right))] max-md:top-[calc(50%+7.5rem)]">
+        <BuildMenu
+          open={buildMenuOpen}
+          onOpenChange={setBuildMenuOpen}
+          resources={myResources}
+          piecesRemaining={{
+            road: me?.roadsRemaining ?? 0,
+            settlement: me?.settlementsRemaining ?? 0,
+            city: me?.citiesRemaining ?? 0,
+            developmentCard: 1,
+          }}
+          deckRemaining={deckRemaining}
+          onPreview={setBuildPreview}
+          onBuild={handleBuildChoice}
+          onTradeFor={openTradeDeskFor}
+          canBuild={canBuild}
+          disabledReason={
+            !isMyTurn ? `Waiting for ${waitingOn}` : !hasRolled ? 'Roll the dice first' : 'You cannot build right now'
+          }
+        />
+      </div>
+
+      <div className="pointer-events-none fixed bottom-[max(1.25rem,calc(env(safe-area-inset-bottom)+0.5rem))] left-[4.25rem] z-[35] max-md:bottom-[calc(5.25rem+env(safe-area-inset-bottom))] max-md:left-[calc(max(0.375rem,env(safe-area-inset-left))+2.75rem)]">
+        <WishlistTag
+          wants={myWishlist.wants ?? null}
+          offers={myWishlist.offers ?? null}
+          onChange={setTradeWishlist}
+          disabled={!isLive}
+        />
+      </div>
+
+      <MiniLog entries={miniLog.entries} players={players} />
+
       <ActionDock
         onRoll={rollDice}
         canRoll={canRollNow}
@@ -696,6 +899,9 @@ export default function App() {
             onPlayDevCard={handlePlayCard}
             canPlay={canAct && isMainGame}
             deckRemaining={deckRemaining}
+            earmarked={earmarkedCards}
+            canTradeAtPort={canBuild}
+            onPortTrade={tradeWithBank}
           />
         </div>
       )}
@@ -730,15 +936,28 @@ export default function App() {
 
       {tradeOpenTurn != null && tradeOpenTurn === (game?.turnNumber ?? 0) && isMainGame && isMyTurn && me && (
         <TradeModal
-          onClose={() => setTradeOpenTurn(null)}
+          onClose={() => {
+            setTradeOpenTurn(null);
+            setTradePrefill(null);
+          }}
           player={me}
           opponents={opponents}
           activeOffer={activeOffer}
           lastResult={lastTradeResult}
-          onPropose={proposeTrade}
+          onPropose={async (target, give, get) => {
+            // Once it is on the table the desk has nothing left to show: the proposer's job
+            // is now to watch the answers come in and pick a partner, which is the status
+            // panel's business.
+            const sent = await proposeTrade(target, give, get);
+            if (sent) {
+              setTradeOpenTurn(null);
+              setTradePrefill(null);
+            }
+          }}
           onCancel={cancelTrade}
           onBankTrade={tradeWithBank}
           disabled={!canBuild}
+          prefillRequest={tradePrefill}
         />
       )}
 
@@ -769,6 +988,20 @@ export default function App() {
           player={me}
           owed={myDiscard}
           onDiscard={discardCards}
+          disabled={!isLive}
+        />
+      )}
+
+      {/* My own offer on the table: who has answered, and who I close the deal with. The
+          trade desk is not open at this point, so this is the only place the choice lives. */}
+      {isMainGame && myLiveOffer && !(tradeOpenTurn != null && tradeOpenTurn === (game?.turnNumber ?? 0)) && (
+        <OfferStatusPanel
+          offer={myLiveOffer}
+          players={players}
+          myPlayerId={myPlayerId}
+          negotiators={negotiators}
+          onConfirm={confirmTrade}
+          onCancel={cancelTrade}
           disabled={!isLive}
         />
       )}

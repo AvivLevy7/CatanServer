@@ -70,6 +70,52 @@ public sealed class Room
 
     public bool IsBot(Guid playerId) => FindById(playerId)?.IsBot ?? false;
 
+    /// <summary>
+    /// What each seat is advertising it wants and will part with, by player id. Kept on the
+    /// room rather than broadcast and forgotten, so a player who refreshes - or one who joins
+    /// late - still sees who is after what.
+    /// </summary>
+    private readonly Dictionary<Guid, TradeWishlistDto> _wishlists = [];
+
+    public IReadOnlyList<TradeWishlistDto> Wishlists
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _wishlists.Values.ToArray();
+            }
+        }
+    }
+
+    /// <summary>Records a seat's wanted/offered pair; both null clears it.</summary>
+    public TradeWishlistDto SetWishlist(Guid playerId, string? wants, string? offers)
+    {
+        var entry = new TradeWishlistDto(playerId, wants, offers);
+        lock (_gate)
+        {
+            if (wants is null && offers is null)
+            {
+                _wishlists.Remove(playerId);
+            }
+            else
+            {
+                _wishlists[playerId] = entry;
+            }
+        }
+
+        return entry;
+    }
+
+    /// <summary>A new round wipes the board of stale wants.</summary>
+    public void ClearWishlists()
+    {
+        lock (_gate)
+        {
+            _wishlists.Clear();
+        }
+    }
+
     public IReadOnlyList<RoomMember> Members
     {
         get

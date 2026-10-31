@@ -107,15 +107,40 @@ function WaxSeal({ children, color }) {
  * While an offer is outstanding it shows its status and a withdraw button instead.
  */
 export default function PlayerTradePanel(props) {
-  // Remount the builder whenever the seat or the countered offer changes so its draft state resets.
-  return <TradeBuilder key={`${props.player?.id ?? 'none'}:${props.counterTo?.offer?.offerId ?? ''}`} {...props} />;
+  // Remount the builder whenever the seat, the countered offer or a pre-filled request
+  // changes, so its draft state resets to the new starting point.
+  const prefillKey = Object.entries(props.prefillRequest ?? {})
+    .map(([k, v]) => `${k}${v}`)
+    .join('');
+  return (
+    <TradeBuilder
+      key={`${props.player?.id ?? 'none'}:${props.counterTo?.offer?.offerId ?? ''}:${prefillKey}`}
+      {...props}
+    />
+  );
 }
 
-function TradeBuilder({ player, opponents, activeOffer, lastResult, onPropose, onCancel, disabled, counterTo = null }) {
+function TradeBuilder({
+  player,
+  opponents,
+  activeOffer,
+  lastResult,
+  onPropose,
+  onCancel,
+  disabled,
+  counterTo = null,
+  // Cards the player is short of for a build they just tried: the desk opens already
+  // asking the table for exactly those.
+  prefillRequest = null,
+}) {
   // Countering flips the original: what they asked of us becomes our "give", what they offered our "get".
   const seed = counterTo?.offer;
   const [giveDraft, setGive] = useState(() => ({ ...EMPTY, ...(seed?.resourcesRequested ?? {}) }));
-  const [get, setGet] = useState(() => ({ ...EMPTY, ...(seed?.resourcesOffered ?? {}) }));
+  const [get, setGet] = useState(() => ({
+    ...EMPTY,
+    ...(seed?.resourcesOffered ?? {}),
+    ...(seed ? {} : prefillRequest ?? {}),
+  }));
   const [target, setTarget] = useState(seed?.senderPlayerId ?? '');
 
   const resources = player?.resources ?? {};

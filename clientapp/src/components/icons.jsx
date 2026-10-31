@@ -303,3 +303,71 @@ export function TrophyIcon(props) {
     </Icon>
   );
 }
+
+/** Embargo: the bots have shut the leader out of trading. */
+export function LockIcon(props) {
+  return (
+    <Icon {...props}>
+      <rect x="4.6" y="10.4" width="14.8" height="10.2" rx="2.2" />
+      <path d="M8 10.4V7.8a4 4 0 0 1 8 0v2.6" />
+      <circle cx="12" cy="15.4" r="1.5" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+/** Harbour trade: a little boat, shown over a stack the player can convert at a port. */
+export function BoatIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M3.2 15.4h17.6l-2.4 4.4a2 2 0 0 1-1.8 1H7.4a2 2 0 0 1-1.8-1z" />
+      <path d="M12 15.4V4.6M12 4.6l5.2 3.2-5.2 2" />
+    </Icon>
+  );
+}
+
+/** Settlement piece: the little house from the board, at icon scale. */
+export function SettlementIcon(props) {
+  return (
+    <Icon filled {...props}>
+      <path d="M4.6 10.8 12 4.2l7.4 6.6v8.4a1 1 0 0 1-1 1H5.6a1 1 0 0 1-1-1z" />
+    </Icon>
+  );
+}
+
+/** City piece: the battlemented keep from the board. */
+export function CityIcon(props) {
+  return (
+    <Icon filled {...props}>
+      <path d="M3 20.4V9.6h4V6.2h2.6v3.4h1.6V6.2H14v3.4h1.4V6.2H18v3.4h3v10.8z" />
+    </Icon>
+  );
+}
+
+/** Wanted / for sale: a shop tag the player pins to their seat. */
+export function TagIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M3.6 11.2V4.6a1 1 0 0 1 1-1h6.6a1 1 0 0 1 .7.3l8 8a1 1 0 0 1 0 1.4l-6.6 6.6a1 1 0 0 1-1.4 0l-8-8a1 1 0 0 1-.3-.7z" />
+      <circle cx="7.9" cy="7.9" r="1.5" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+/** Mini-log: a building went up. */
+export function HammerIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M13.4 6.2 17.8 1.8l4.4 4.4-4.4 4.4z" />
+      <path d="m15.6 8.4-9 9M4.2 16.2l3.6 3.6-1.8 1.8a2.55 2.55 0 0 1-3.6-3.6z" />
+    </Icon>
+  );
+}
+
+/** Mini-log: an arrow between two parties. */
+export function ArrowRightIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M4.4 12h15.2M13.6 6l6 6-6 6" />
+    </Icon>
+  );
+}

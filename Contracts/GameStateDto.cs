@@ -55,17 +55,29 @@ public sealed record RoadDto(string EdgeId, Guid OwnerId);
 
 public sealed record DiceRollDto(int First, int Second, int Total);
 
-/// <summary>Pending player-to-player offer; TargetPlayerId is null for an open offer.</summary>
+/// <summary>
+/// Pending player-to-player offer; TargetPlayerId is null for an open offer.
+/// <paramref name="AcceptedBy"/> are the players waiting on the proposer to pick a partner,
+/// <paramref name="EmbargoedBy"/> those refusing on principle rather than on the terms, and
+/// <paramref name="ExpiresAt"/> is when the offer withdraws itself.
+/// </summary>
 public sealed record TradeOfferDto(
     Guid OfferId,
     Guid SenderPlayerId,
     Guid? TargetPlayerId,
     IReadOnlyDictionary<string, int> ResourcesOffered,
     IReadOnlyDictionary<string, int> ResourcesRequested,
-    IReadOnlyList<Guid> DeclinedBy);
+    IReadOnlyList<Guid> DeclinedBy,
+    IReadOnlyList<Guid> AcceptedBy,
+    IReadOnlyList<Guid> EmbargoedBy,
+    DateTimeOffset? ExpiresAt);
 
-/// <summary>Sent to the proposer when an offer is accepted, declined or dropped.</summary>
-public sealed record TradeResolvedDto(Guid OfferId, Guid? ByPlayerId, string Outcome);
+/// <summary>
+/// Sent to the table when an offer is accepted, declined, confirmed or dropped.
+/// <paramref name="Offer"/> is carried on a confirmation so clients can report what actually
+/// changed hands - by then the offer itself has been cleared from the game state.
+/// </summary>
+public sealed record TradeResolvedDto(Guid OfferId, Guid? ByPlayerId, string Outcome, TradeOfferDto? Offer = null);
 
 /// <summary>Full match snapshot: board plus players, buildings, roads and turn info. Server-side only; never sent raw.</summary>
 public record GameStateDto(
@@ -93,7 +105,8 @@ public record GameStateDto(
     bool AllowSevens,
     bool HasRolledDice,
     DateTimeOffset? TurnDeadline,
-    IReadOnlyDictionary<int, int> DiceRollFrequencies);
+    IReadOnlyDictionary<int, int> DiceRollFrequencies,
+    IReadOnlyList<string> LongestRoadPath);
 
 /// <summary>
 /// What one player is allowed to see: their own hand in full, every opponent reduced to
@@ -160,6 +173,12 @@ public static class Emotes
         "Taunt",
     };
 }
+
+/// <summary>
+/// What a seat is advertising it wants and what it will part with, set from their own hand
+/// and shown beside every seat chip. Either side may be null for "nothing in particular".
+/// </summary>
+public sealed record TradeWishlistDto(Guid PlayerId, string? Wants, string? Offers);
 
 /// <summary>Negotiation vocabulary: looking at an offer, drafting a counter, or done.</summary>
 public static class Negotiation

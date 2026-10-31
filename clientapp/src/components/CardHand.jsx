@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RESOURCES } from '../resources';
 import { RESOURCE_STYLE } from '../theme';
+import { BoatIcon } from './icons';
 
 const DEV_META = {
   Knight: { label: 'Knight', glyph: '\u2694', face: 'from-seat-red via-rose-900 to-rose-950 ring-rose-300/50', hint: 'Move the robber and steal a card' },
@@ -27,18 +28,20 @@ function CardFrame({ children, className = '', ...rest }) {
   );
 }
 
-function ResourceCardFace({ resource, count, index, selected, onSelect }) {
+function ResourceCardFace({ resource, count, index, selected, onSelect, earmarked = false }) {
   const style = RESOURCE_STYLE[resource];
   const label = RESOURCES.find((r) => r.key === resource)?.label ?? resource;
   return (
     <CardFrame
-      className={`${style.card} ${style.ink} cursor-pointer ${index > 0 ? '-ml-3 max-md:-ml-2' : ''}`}
-      style={{ zIndex: index }}
+      className={`${style.card} ${style.ink} cursor-pointer ${index > 0 ? '-ml-3 max-md:-ml-2' : ''} ${
+        earmarked ? 'card-earmarked z-20 -translate-y-3 scale-105' : ''
+      }`}
+      style={{ zIndex: earmarked ? 20 : index }}
       title={`${count} ${label}`}
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`${count} ${label}`}
+      aria-label={`${count} ${label}${earmarked ? ', needed for the selected build' : ''}`}
       data-selected={selected}
       onClick={onSelect}
       onKeyDown={(e) => {
@@ -124,11 +127,43 @@ function CardBack({ label, small = false }) {
  * the left of a gold rule, unplayed development cards on its right. Only ever receives the
  * viewer's PlayerDto - the only one the server sends with resources/developmentCards populated.
  */
-export default function CardHand({ player, onPlayDevCard, canPlay, deckRemaining }) {
+export default function CardHand({
+  player,
+  onPlayDevCard,
+  canPlay,
+  deckRemaining,
+  // Cost bundle to lift out of the fan while a build is being previewed.
+  earmarked = null,
+  // Harbour conversions are only offered on the player's own turn, after the roll.
+  canTradeAtPort = false,
+  onPortTrade,
+}) {
   // Which card is raised; a string key so resources and dev cards share one slot.
   const [selectedKey, setSelectedKey] = useState(null);
   const toggle = (key) => setSelectedKey((current) => (current === key ? null : key));
+  // Which stack's harbour bubble is open, by resource key.
+  const [portPick, setPortPick] = useState(null);
+  const portRef = useRef(null);
 
+  useEffect(() => {
+    if (!portPick) return undefined;
+    const onPointerDown = (e) => {
+      if (!portRef.current?.contains(e.target)) setPortPick(null);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setPortPick(null);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [portPick]);
+
+  // Rates come from the server per player: 4 by default, 3 at a generic harbour, 2 at a
+  // matching one. Holding that many of a card means it can be converted right now.
+  const rates = player?.bankRates ?? {};
   const resources = player?.resources ?? {};
   const devCards = (player?.developmentCards ?? []).filter((c) => !c.isPlayed);
   const total = Object.values(resources).reduce((a, b) => a + b, 0);
@@ -143,16 +178,74 @@ export default function CardHand({ player, onPlayDevCard, canPlay, deckRemaining
           resource icons after a roll. */}
       <div className="flex items-end" aria-label="Your resources" data-resource-hand="">
         {total === 0 && <CardBack label="Empty" />}
-        {owned.map(({ key }, i) => (
-          <ResourceCardFace
-            key={key}
-            resource={key}
-            count={resources[key]}
-            index={i}
-            selected={selectedKey === `res:${key}`}
-            onSelect={() => toggle(`res:${key}`)}
-          />
-        ))}
+        {owned.map(({ key }, i) => {
+          const rate = rates[key] ?? 4;
+          const canConvert = canTradeAtPort && (resources[key] ?? 0) >= rate;
+          return (
+            <div key={key} className="relative" ref={portPick === key ? portRef : undefined}>
+              <ResourceCardFace
+                resource={key}
+                count={resources[key]}
+                index={i}
+                selected={selectedKey === `res:${key}`}
+                onSelect={() => toggle(`res:${key}`)}
+                earmarked={(earmarked?.[key] ?? 0) > 0}
+              />
+
+              {/* Harbour badge: this stack is already big enough to convert at the
+                  player's best rate for it. */}
+              {canConvert && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPortPick((current) => (current === key ? null : key));
+                  }}
+                  title={`Trade ${rate} for any 1 resource (${rate}:1)`}
+                  aria-label={`Trade ${rate} ${key} at ${rate} to 1`}
+                  aria-expanded={portPick === key}
+                  className={`animate-port-bob absolute -top-2.5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-black leading-none shadow-lg transition-transform hover:scale-110 ${
+                    portPick === key
+                      ? 'border-amber-100 bg-amber-300 text-ink-900'
+                      : 'border-sky-200/80 bg-sky-700 text-sky-50'
+                  }`}
+                >
+                  <BoatIcon className="size-3" />
+                  {rate}:1
+                </button>
+              )}
+
+              {/* Quick-pick: what to take in exchange. */}
+              {portPick === key && (
+                <div
+                  role="menu"
+                  aria-label={`Convert ${rate} ${key} into`}
+                  className="panel-glass absolute bottom-full left-1/2 z-40 mb-3 flex -translate-x-1/2 items-center gap-1 p-1.5"
+                >
+                  {RESOURCES.filter((r) => r.key !== key).map((r) => {
+                    const s = RESOURCE_STYLE[r.key];
+                    return (
+                      <button
+                        key={r.key}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setPortPick(null);
+                          onPortTrade?.(key, r.key);
+                        }}
+                        title={`Take 1 ${r.label}`}
+                        aria-label={`Take 1 ${r.label}`}
+                        className={`flex size-9 items-center justify-center rounded-md bg-gradient-to-b text-lg leading-none ring-1 ring-black/40 transition-transform hover:scale-110 ${s.card} ${s.ink}`}
+                      >
+                        <span aria-hidden="true">{s.glyph}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Gold rule between the two groups */}

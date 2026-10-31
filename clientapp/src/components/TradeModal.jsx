@@ -25,6 +25,7 @@ export default function TradeModal({
   onBankTrade,
   disabled,
   counterTo = null,
+  prefillRequest = null,
 }) {
   const [tab, setTab] = useState('players');
   const tabs = counterTo ? TABS.filter((t) => t.id === 'players') : TABS;
@@ -104,6 +105,7 @@ export default function TradeModal({
               onCancel={onCancel}
               disabled={disabled}
               counterTo={counterTo}
+              prefillRequest={prefillRequest}
             />
           ) : (
             <TradePanel player={player} onTrade={onBankTrade} disabled={disabled} />

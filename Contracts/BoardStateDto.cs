@@ -27,7 +27,10 @@ public sealed record NodeDto(
     string AnchorCorner,
     Guid? OwnerId,
     string Building,
-    string Harbor);
+    string Harbor,
+    /// <summary>Every hex touching this intersection (one to three), so the client can
+    /// total their dice pips when choosing a starting settlement.</summary>
+    IReadOnlyList<string> HexIds);
 
 /// <summary>Wire format for a path between two intersections.</summary>
 public sealed record EdgeDto(

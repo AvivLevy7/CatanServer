@@ -1,5 +1,6 @@
-import { seat } from '../theme';
+import { seat, RESOURCE_STYLE } from '../theme';
 import { RESOURCES } from '../resources';
+import TradeStatusIcon from './TradeStatusIcon';
 import {
   CardsIcon,
   CrownIcon,
@@ -52,6 +53,8 @@ function PlayerChip({
   hasLongestRoad,
   owedDiscard,
   negotiating,
+  wishlist,
+  tradeStatus,
 }) {
   const s = seat(player.color);
   const resourceCount =
@@ -90,6 +93,29 @@ function PlayerChip({
             {player.name}
           </span>
         </div>
+
+        {/* Standing "wanted / for sale" notice, so the active player can see who to
+            approach without opening anything. */}
+        {wishlist && (wishlist.wants || wishlist.offers) && (
+          <span
+            className="animate-wish-pop flex shrink-0 items-center gap-px rounded-md bg-black/40 px-1 py-0.5 ring-1 ring-amber-700/50"
+            title={`Wants ${wishlist.wants ?? 'nothing'} - offers ${wishlist.offers ?? 'nothing'}`}
+            aria-label={`${player.name} wants ${wishlist.wants ?? 'nothing'} and offers ${wishlist.offers ?? 'nothing'}`}
+          >
+            {wishlist.wants && (
+              <span className="text-[11px] leading-none" aria-hidden="true">
+                {'↓'}
+                {RESOURCE_STYLE[wishlist.wants]?.glyph}
+              </span>
+            )}
+            {wishlist.offers && (
+              <span className="text-[11px] leading-none" aria-hidden="true">
+                {'↑'}
+                {RESOURCE_STYLE[wishlist.offers]?.glyph}
+              </span>
+            )}
+          </span>
+        )}
 
         <div className="flex items-center gap-1 max-md:gap-0.5">
           <Stat
@@ -142,16 +168,24 @@ function PlayerChip({
         </span>
       )}
 
-      {/* Weighing the live trade offer. */}
-      {negotiating && (
-        <span
-          role="status"
-          title={`${player.name} ${NEGOTIATION_LABEL[negotiating] ?? 'is considering the offer'}`}
-          aria-label={`${player.name} ${NEGOTIATION_LABEL[negotiating] ?? 'is considering the offer'}`}
-          className="pointer-events-none absolute -bottom-1 -right-1 z-10 flex size-5 items-center justify-center rounded-full border border-amber-200/80 bg-amber-400 text-ink-900 shadow-lg"
-        >
-          <ScalesIcon className="animate-scales size-3.5" />
+      {/* Where this seat stands on the live offer. The settled answer (accepted, declined,
+          embargoed) wins over the softer "still reading" hint, and the scales are the
+          fallback for a seat deliberating with no offer of its own on the table. */}
+      {tradeStatus && tradeStatus !== 'idle' && tradeStatus !== 'waiting' ? (
+        <span className="pointer-events-none absolute -bottom-1 -right-1 z-10">
+          <TradeStatusIcon status={tradeStatus} playerName={player.name} className="size-5 shadow-lg" />
         </span>
+      ) : (
+        negotiating && (
+          <span
+            role="status"
+            title={`${player.name} ${NEGOTIATION_LABEL[negotiating] ?? 'is considering the offer'}`}
+            aria-label={`${player.name} ${NEGOTIATION_LABEL[negotiating] ?? 'is considering the offer'}`}
+            className="pointer-events-none absolute -bottom-1 -right-1 z-10 flex size-5 items-center justify-center rounded-full border border-amber-200/80 bg-amber-400 text-ink-900 shadow-lg"
+          >
+            <ScalesIcon className="animate-scales size-3.5" />
+          </span>
+        )
       )}
     </li>
   );
@@ -166,6 +200,8 @@ export default function PlayerStatusBar({
   longestRoadHolderId,
   pendingDiscards = {},
   negotiators = {},
+  wishlists = {},
+  tradeStatuses = {},
 }) {
   return (
     <ul
@@ -182,6 +218,8 @@ export default function PlayerStatusBar({
           hasLongestRoad={player.id === longestRoadHolderId}
           owedDiscard={pendingDiscards[player.id] ?? 0}
           negotiating={negotiators[player.id] ?? null}
+          wishlist={wishlists[player.id] ?? null}
+          tradeStatus={tradeStatuses[player.id] ?? null}
         />
       ))}
     </ul>
