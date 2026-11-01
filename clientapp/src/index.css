@@ -658,20 +658,6 @@ body,
   animation: road-claim 0.9s ease-out var(--road-delay, 0s) both;
 }
 
-/* ---- Setup-phase pip hints ---- */
-
-/* The probability ring on an empty intersection fades up with the board rather than
-   snapping in, so the setup board does not flash when it first renders. */
-@keyframes pip-in {
-  from { opacity: 0; transform: scale(0.6); }
-  to { opacity: 1; transform: scale(1); }
-}
-.animate-pip-in {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: pip-in 0.3s ease-out both;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .trade-ring,
   .animate-status-dot,
@@ -679,8 +665,7 @@ body,
   .animate-partner-ready,
   .animate-port-bob,
   .animate-wish-pop,
-  .animate-road-claim,
-  .animate-pip-in {
+  .animate-road-claim {
     animation: none;
   }
   /* The feed still needs to clear itself, so it keeps its timing and loses only the

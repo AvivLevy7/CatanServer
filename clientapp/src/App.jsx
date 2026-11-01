@@ -729,7 +729,6 @@ export default function App() {
             placedNodeIds={placementImpact.nodes}
             placedEdgeIds={placementImpact.edges}
             roadClaimPath={roadClaimPath}
-            showPips={isSetup}
           />
         </ZoomableBoard>
       </div>

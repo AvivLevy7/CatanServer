@@ -18,9 +18,6 @@ const PADDING = HEX_SIZE * 0.98;
 const EMPTY_SET = new Set();
 const EMPTY_ARRAY = [];
 
-// Dice pips per number token, mirroring the dots printed on the physical tokens.
-const PIPS = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
-
 export default function Board({
   tiles,
   nodes = [],
@@ -41,28 +38,12 @@ export default function Board({
   placedEdgeIds = EMPTY_SET,
   // Edge ids of a Longest Road trail being celebrated, in order along the route.
   roadClaimPath = EMPTY_ARRAY,
-  // Setup only: show each empty corner's total dice pips.
-  showPips = false,
 }) {
   // Position within the trail drives the stagger, so look-up has to be by id.
   const claimOrder = useMemo(
     () => new Map(roadClaimPath.map((edgeId, i) => [edgeId, i])),
     [roadClaimPath],
   );
-
-  // Total pips of the hexes touching each intersection: how much production a starting
-  // settlement there would actually see. 6 and 8 are worth 5 each, 2 and 12 just 1.
-  const pipsByNode = useMemo(() => {
-    if (!showPips) return null;
-    const pipsByHex = new Map(tiles.map((tile) => [tile.id, PIPS[tile.numberToken] ?? 0]));
-    const totals = new Map();
-    for (const node of nodes) {
-      let total = 0;
-      for (const hexId of node.hexIds ?? []) total += pipsByHex.get(hexId) ?? 0;
-      totals.set(node.id, total);
-    }
-    return totals;
-  }, [showPips, tiles, nodes]);
   // Every node is anchored to a real hex corner, so its position is exactly the
   // same formula HexTile uses to draw that corner - no drift between layers.
   const nodePositions = useMemo(() => {
@@ -173,7 +154,6 @@ export default function Board({
                 node.ownerId === upgradablePlayerId
               }
               justPlaced={placedNodeIds.has(node.id)}
-              pips={pipsByNode?.get(node.id) ?? null}
               onClick={onNodeClick}
             />
           );
