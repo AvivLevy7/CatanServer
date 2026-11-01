@@ -75,3 +75,17 @@ public static class BuildingCosts
         [ResourceType.Wool] = 1
     };
 }
+
+/// <summary>Timings for taking a misclicked build back.</summary>
+public static class BuildRules
+{
+    /// <summary>
+    /// How long a road or settlement may be taken back for. Short on purpose: it covers a
+    /// fat-fingered tap on a touchscreen, not a change of mind, and the game only offers it
+    /// while nothing random (a card draw, a roll) has happened since.
+    /// </summary>
+    public static readonly TimeSpan UndoWindow = TimeSpan.FromSeconds(3);
+
+    /// <summary>Slack past the window, so an undo sent as it closes still lands.</summary>
+    public static readonly TimeSpan UndoGrace = TimeSpan.FromMilliseconds(900);
+}

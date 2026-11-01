@@ -19,11 +19,25 @@ public sealed class TurnTimerService : IDisposable
     /// <summary>Grace left to a player who disconnects mid-turn.</summary>
     public static readonly TimeSpan DisconnectGrace = TimeSpan.FromSeconds(15);
 
+    /// <summary>
+    /// How long the table waits for everyone who owes cards after a 7. Its own, shorter
+    /// clock: the players still holding the game up are not the one whose turn it is.
+    /// </summary>
+    public static readonly TimeSpan DiscardLength = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// One-off reprieve granted when the clock runs out with an offer still on the table, so
+    /// a live negotiation is never cut off mid-sentence.
+    /// </summary>
+    public static readonly TimeSpan NegotiationExtension = TimeSpan.FromSeconds(10);
+
     private sealed class Entry : IDisposable
     {
         public required Timer Timer { get; init; }
         public (GamePhase Phase, Guid Actor, bool Rolled, int Turn) Key { get; set; }
         public DateTimeOffset Deadline { get; set; }
+        /// <summary>True once this actor's clock has already been extended for a negotiation.</summary>
+        public bool Extended { get; set; }
         public int Firing;
         public void Dispose() => Timer.Dispose();
     }
@@ -56,6 +70,19 @@ public sealed class TurnTimerService : IDisposable
             return;
         }
 
+        // Everybody has dropped: freeze the game where it stands rather than letting the
+        // clock - and the bots behind it - play the whole thing out to an empty room. The
+        // clock starts again from RejoinRoom when somebody comes back.
+        if (!room.HasConnectedHuman)
+        {
+            Stop(room.Id);
+            return;
+        }
+
+        // A 7 with a dropped player at the table would otherwise stall everyone: discard for
+        // them at once rather than making the room wait out the clock.
+        AutoDiscardForAbsentees(room);
+
         var key = room.Game.TurnKey;
         if (key.Phase == GamePhase.GameOver)
         {
@@ -73,7 +100,9 @@ public sealed class TurnTimerService : IDisposable
             return;
         }
 
-        var length = IsActorConnected(room, key.Actor) ? TurnLength : DisconnectGrace;
+        var length = key.Phase == GamePhase.WaitingForDiscards
+            ? DiscardLength
+            : IsActorConnected(room, key.Actor) ? TurnLength : DisconnectGrace;
         Arm(room, entry, key, length);
     }
 
@@ -128,15 +157,58 @@ public sealed class TurnTimerService : IDisposable
 
         if (_rooms.TryGet(roomId, out var room))
         {
-            room.Game.SetTurnDeadline(null);
+            room.Game.SetTurnDeadline(null, 0, false);
         }
     }
 
-    private void Arm(Room room, Entry entry, (GamePhase, Guid, bool, int) key, TimeSpan length)
+    /// <summary>
+    /// Autopilot for seats that cannot answer: anyone who owes cards after a 7 but has no
+    /// live connection (and is not a bot, which discards on its own) is discarded for
+    /// immediately, at random, so the rest of the table is never blocked by an empty chair.
+    /// </summary>
+    private void AutoDiscardForAbsentees(Room room)
     {
+        var owing = room.Game.PlayersOwingDiscards
+            .Where(id => room.FindById(id) is { IsBot: false, ConnectionId: null })
+            .ToArray();
+
+        var acted = false;
+        foreach (var playerId in owing)
+        {
+            if (room.Game.AutoDiscardFor(playerId) is not { } result)
+            {
+                continue;
+            }
+
+            acted = true;
+            _logger.LogInformation(
+                "[{RoomId}] Auto-discarded {Count} cards for absent player {Player}",
+                room.Id, result.Discarded, playerId);
+            _ = _hub.Clients.Group(room.Id).SystemMessage(new SystemMessageDto(
+                $"{NameOf(room, playerId)} is away - {result.Discarded} card{(result.Discarded == 1 ? string.Empty : "s")} were discarded for them.",
+                "bad",
+                DateTimeOffset.UtcNow));
+            _ = BroadcastState(room, result.State);
+        }
+
+        // The phase has moved on (robber, most likely), which may now be a bot's problem.
+        if (acted)
+        {
+            Resolved?.Invoke(room);
+        }
+    }
+
+    private void Arm(Room room, Entry entry, (GamePhase Phase, Guid Actor, bool Rolled, int Turn) key, TimeSpan length)
+    {
+        // A new actor-to-wait-for gets a fresh right to one negotiation extension.
+        if (entry.Key != key)
+        {
+            entry.Extended = false;
+        }
+
         entry.Key = key;
         entry.Deadline = DateTimeOffset.UtcNow + length;
-        room.Game.SetTurnDeadline(entry.Deadline);
+        room.Game.SetTurnDeadline(entry.Deadline, (int)length.TotalSeconds, entry.Extended);
         entry.Timer.Change(length, Timeout.InfiniteTimeSpan);
 
         // Push the new deadline so every client's countdown lines up with the server.
@@ -161,6 +233,19 @@ public sealed class TurnTimerService : IDisposable
             // Stale fire: the player acted in the meantime and the clock was rearmed.
             if (entry.Deadline > DateTimeOffset.UtcNow.AddMilliseconds(250))
             {
+                return;
+            }
+
+            // Mid-negotiation: an offer is still on the table and nobody has closed it. Hand
+            // the clock ten more seconds - once - rather than ending the turn over a haggle.
+            if (!entry.Extended && room.Game.HasActiveTradeOffer)
+            {
+                entry.Extended = true;
+                Arm(room, entry, entry.Key, NegotiationExtension);
+                await _hub.Clients.Group(roomId).SystemMessage(new SystemMessageDto(
+                    $"Trade in progress - {NegotiationExtension.TotalSeconds:0} seconds added to the clock.",
+                    "info",
+                    DateTimeOffset.UtcNow));
                 return;
             }
 

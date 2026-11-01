@@ -50,6 +50,11 @@ public sealed class Game
     // Road Building: free roads still owed to the current player.
     private int _freeRoadsRemaining;
 
+    // The one road or settlement the current player may still take back (a misclick on a
+    // touchscreen). Anything that makes a take-back unsound clears it: the turn passing, a
+    // roll, a card bought or played, a trade settled, or a later build.
+    private UndoableBuild? _undoableBuild;
+
     public Game(Guid id, BoardGraph board, IReadOnlyList<Player> players, Random? random = null, bool allowSevens = true)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(players.Count, 2);
@@ -91,6 +96,17 @@ public sealed class Game
     public TradeOffer? ActiveTradeOffer { get; private set; }
 
     public int FreeRoadsRemaining => _freeRoadsRemaining;
+
+    /// <summary>
+    /// The build the player whose turn it is may still take back, or null when there is
+    /// none, the window has closed, or the turn has moved on.
+    /// </summary>
+    public UndoableBuild? UndoableBuild =>
+        _undoableBuild is { } record
+        && record.TurnNumber == TurnNumber
+        && DateTimeOffset.UtcNow <= record.ExpiresAt + BuildRules.UndoGrace
+            ? record
+            : null;
 
     public Guid? LargestArmyHolderId { get; private set; }
 
@@ -270,10 +286,12 @@ public sealed class Game
             throw new GameRuleException("A settlement costs 1 Wood, 1 Brick, 1 Wheat and 1 Sheep.");
         }
 
+        var priorTitle = CaptureRoadTitle();
         player.Pay(BuildingCosts.Settlement);
         node.Occupy(playerId, BuildingType.Settlement);
         player.AwardVictoryPoints(new Building(nodeId, playerId, BuildingType.Settlement).VictoryPoints);
         UpdateLongestRoad();
+        _undoableBuild = UndoableBuild.ForSettlement(playerId, nodeId, TurnNumber, priorTitle);
     }
 
     /// <summary>
@@ -297,6 +315,8 @@ public sealed class Game
             throw new GameRuleException("A development card costs 1 Ore, 1 Wheat and 1 Sheep.");
         }
 
+        // A card has been drawn, so the board can no longer be rewound past this point.
+        _undoableBuild = null;
         player.Pay(BuildingCosts.DevelopmentCard);
         _deck.TryDraw(out var type);
 
@@ -333,15 +353,18 @@ public sealed class Game
         _robberFromKnight = true;
     }
 
-    /// <summary>Monopoly: every opponent hands over all of one resource.</summary>
-    public int PlayMonopoly(Guid playerId, Guid cardId, ResourceType resource)
+    /// <summary>
+    /// Monopoly: every opponent hands over all of one resource. The haul is reported per
+    /// victim, so the table can be shown exactly whose cards drained where.
+    /// </summary>
+    public MonopolyHaul PlayMonopoly(Guid playerId, Guid cardId, ResourceType resource)
     {
         var (player, card) = BeginPlayingCard(playerId, cardId, DevelopmentCardType.Monopoly);
 
         card.MarkPlayed();
         _developmentCardPlayedThisTurn = true;
 
-        var collected = 0;
+        var takes = new List<MonopolyTake>();
         foreach (var victim in _players.Where(p => p.Id != playerId))
         {
             var amount = victim.Resources[resource];
@@ -351,11 +374,12 @@ public sealed class Game
             }
 
             victim.Pay(new Dictionary<ResourceType, int> { [resource] = amount });
-            collected += amount;
+            takes.Add(new MonopolyTake(victim.Id, amount));
         }
 
-        player.AddResources(resource, collected);
-        return collected;
+        var haul = new MonopolyHaul(playerId, resource, takes);
+        player.AddResources(resource, haul.Collected);
+        return haul;
     }
 
     /// <summary>Year of Plenty: take any two resources from the bank.</summary>
@@ -403,6 +427,7 @@ public sealed class Game
         RequireTurn(playerId);
 
         var edge = RequireBuildableRoadEdge(playerId, edgeId);
+        _undoableBuild = null;
         edge.PlaceRoad(playerId);
         UpdateLongestRoad();
 
@@ -430,6 +455,7 @@ public sealed class Game
         }
 
         RequireCardPlayable(card);
+        _undoableBuild = null;
         return (player, card);
     }
 
@@ -473,6 +499,7 @@ public sealed class Game
             throw new GameRuleException($"You need {rate} {give} to trade with the bank.");
         }
 
+        _undoableBuild = null;
         player.Pay(new Dictionary<ResourceType, int> { [give] = rate });
         player.AddResources(receive, 1);
     }
@@ -668,6 +695,7 @@ public sealed class Game
             throw new GameRuleException($"{partner.Name} no longer has the requested resources.");
         }
 
+        _undoableBuild = null;
         sender.Pay(offer.ResourcesOffered);
         partner.Pay(offer.ResourcesRequested);
         foreach (var (type, amount) in offer.ResourcesOffered)
@@ -788,6 +816,7 @@ public sealed class Game
             throw new GameRuleException("A city costs 3 Ore and 2 Wheat.");
         }
 
+        _undoableBuild = null;
         player.Pay(BuildingCosts.City);
         node.Occupy(playerId, BuildingType.City);
 
@@ -816,9 +845,11 @@ public sealed class Game
             throw new GameRuleException("A road costs 1 Wood and 1 Brick.");
         }
 
+        var priorTitle = CaptureRoadTitle();
         player.Pay(BuildingCosts.Road);
         edge.PlaceRoad(playerId);
         UpdateLongestRoad();
+        _undoableBuild = UndoableBuild.ForRoad(playerId, edge.Id, TurnNumber, priorTitle);
     }
 
     /// <summary>Validates an edge for a new road: on the board, empty, and connected to the player's network.</summary>
@@ -928,6 +959,7 @@ public sealed class Game
         var roll = DiceRoll.Roll(_random, AllowSevens);
         LastRoll = roll;
         HasRolledDice = true;
+        _undoableBuild = null;
         _diceRollFrequencies[roll.Total]++;
 
         if (roll.ActivatesRobber)
@@ -972,6 +1004,8 @@ public sealed class Game
         {
             throw new GameRuleException("You do not hold those cards.");
         }
+
+        _undoableBuild = null;
 
         player.Pay(cards);
         _pendingDiscards.Remove(playerId);
@@ -1082,6 +1116,107 @@ public sealed class Game
         from.Pay(new Dictionary<ResourceType, int> { [resource] = 1 });
         to.AddResources(resource, 1);
         return new ResourceGrant(to.Id, resource, 1, atHex);
+    }
+
+    /// <summary>
+    /// Takes back the road or settlement just built. Nothing else can have happened since -
+    /// any roll, card, trade or further build clears the record - so the piece, its cost and
+    /// the Longest Road title all go back exactly as they were.
+    /// </summary>
+    public UndoableBuild UndoLastBuild(Guid playerId)
+    {
+        RequireMainGame();
+        RequireTurn(playerId);
+
+        var record = _undoableBuild
+            ?? throw new GameRuleException("There is nothing to take back.");
+
+        if (record.PlayerId != playerId || record.TurnNumber != TurnNumber)
+        {
+            _undoableBuild = null;
+            throw new GameRuleException("That build can no longer be taken back.");
+        }
+
+        if (DateTimeOffset.UtcNow > record.ExpiresAt + BuildRules.UndoGrace)
+        {
+            _undoableBuild = null;
+            throw new GameRuleException("Too late to take that build back.");
+        }
+
+        var player = GetPlayer(playerId);
+
+        if (record.Kind == UndoableBuildKind.Settlement)
+        {
+            var nodeId = record.NodeId!.Value;
+            var node = Board.GetNode(nodeId);
+            if (node.OwnerId != playerId || node.Building != BuildingType.Settlement)
+            {
+                _undoableBuild = null;
+                throw new GameRuleException("That build can no longer be taken back.");
+            }
+
+            node.Clear();
+            player.RevokeVictoryPoints(new Building(nodeId, playerId, BuildingType.Settlement).VictoryPoints);
+            Refund(player, BuildingCosts.Settlement);
+        }
+        else
+        {
+            var edge = Board.GetEdge(record.EdgeId!.Value);
+            if (edge.OwnerId != playerId)
+            {
+                _undoableBuild = null;
+                throw new GameRuleException("That build can no longer be taken back.");
+            }
+
+            edge.Clear();
+            Refund(player, BuildingCosts.Road);
+        }
+
+        RestoreRoadTitle(record.PriorRoadTitle);
+        _undoableBuild = null;
+        return record;
+    }
+
+    private static void Refund(Player player, IReadOnlyDictionary<ResourceType, int> cost)
+    {
+        foreach (var (type, amount) in cost)
+        {
+            player.AddResources(type, amount);
+        }
+    }
+
+    /// <summary>The Longest Road title exactly as it stands, for a take-back to put back.</summary>
+    private RoadTitle CaptureRoadTitle() => new(LongestRoadHolderId, LongestRoadLength, LongestRoadPath);
+
+    /// <summary>
+    /// Restores the title a taken-back build had displaced. The board is byte-for-byte what
+    /// it was before that build, so the old title is right by construction: it is put back
+    /// wholesale rather than recomputed, which also keeps the "the holder keeps it until
+    /// someone strictly beats it" history intact.
+    /// </summary>
+    private void RestoreRoadTitle(RoadTitle prior)
+    {
+        foreach (var player in _players)
+        {
+            _roadLengths[player.Id] = LongestRoadFor(player.Id);
+        }
+
+        if (LongestRoadHolderId != prior.HolderId)
+        {
+            if (LongestRoadHolderId is { } current)
+            {
+                GetPlayer(current).RevokeVictoryPoints(Achievements.BonusVictoryPoints);
+            }
+
+            if (prior.HolderId is { } restored)
+            {
+                GetPlayer(restored).AwardVictoryPoints(Achievements.BonusVictoryPoints);
+            }
+        }
+
+        LongestRoadHolderId = prior.HolderId;
+        LongestRoadLength = prior.Length;
+        LongestRoadPath = prior.Path;
     }
 
     public Player EndTurn() => EndTurn(CurrentTurnPlayerId);
@@ -1210,18 +1345,34 @@ public sealed class Game
     {
         foreach (var (playerId, owed) in _pendingDiscards.ToArray())
         {
-            var pool = GetPlayer(playerId).Resources
-                .SelectMany(pair => Enumerable.Repeat(pair.Key, pair.Value))
-                .OrderBy(_ => _random.Next())
-                .Take(owed);
-
-            var discard = pool
-                .GroupBy(resource => resource)
-                .ToDictionary(group => group.Key, group => group.Count());
-
-            DiscardCards(playerId, discard);
+            DiscardCards(playerId, RandomDiscard(playerId, owed));
         }
     }
+
+    /// <summary>
+    /// Discards at random on one player's behalf: the autopilot for a seat that has dropped
+    /// or stopped answering, so a 7 cannot leave the whole table waiting on it. Returns the
+    /// number of cards taken, or null when that player owed nothing.
+    /// </summary>
+    public int? AutoDiscardFor(Guid playerId)
+    {
+        if (Phase != GamePhase.WaitingForDiscards || !_pendingDiscards.TryGetValue(playerId, out var owed))
+        {
+            return null;
+        }
+
+        DiscardCards(playerId, RandomDiscard(playerId, owed));
+        return owed;
+    }
+
+    /// <summary>A random <paramref name="count"/> cards from a hand, weighted by card not by type.</summary>
+    private Dictionary<ResourceType, int> RandomDiscard(Guid playerId, int count) =>
+        GetPlayer(playerId).Resources
+            .SelectMany(pair => Enumerable.Repeat(pair.Key, pair.Value))
+            .OrderBy(_ => _random.Next())
+            .Take(count)
+            .GroupBy(resource => resource)
+            .ToDictionary(group => group.Key, group => group.Count());
 
     private void AutoMoveRobber()
     {
@@ -1237,6 +1388,7 @@ public sealed class Game
 
     private void AdvanceTurn()
     {
+        _undoableBuild = null;
         _currentTurnIndex = (_currentTurnIndex + 1) % _players.Count;
         TurnNumber++;
         _developmentCardPlayedThisTurn = false;
@@ -1631,3 +1783,49 @@ public sealed record RollOutcome(Guid RolledBy, DiceRoll Roll, IReadOnlyList<Res
 
 /// <summary>What the host did on behalf of <paramref name="TimedOutPlayerId"/> when the clock ran out.</summary>
 public sealed record TimeoutResolution(Guid TimedOutPlayerId, IReadOnlyList<string> Actions, RollOutcome? Roll);
+
+/// <summary>Which kind of piece a take-back would remove.</summary>
+public enum UndoableBuildKind
+{
+    Road,
+    Settlement
+}
+
+/// <summary>The Longest Road title at a point in time, so a take-back can put it back.</summary>
+public sealed record RoadTitle(Guid? HolderId, int Length, IReadOnlyList<EdgeId> Path);
+
+/// <summary>
+/// A road or settlement still inside its take-back window, with the Longest Road title it
+/// displaced when it went down.
+/// </summary>
+public sealed record UndoableBuild(
+    Guid PlayerId,
+    UndoableBuildKind Kind,
+    NodeId? NodeId,
+    EdgeId? EdgeId,
+    int TurnNumber,
+    DateTimeOffset At,
+    RoadTitle PriorRoadTitle)
+{
+    public DateTimeOffset ExpiresAt => At + BuildRules.UndoWindow;
+
+    /// <summary>The piece's board id, so the client can point its undo button at it.</summary>
+    public string PieceId => Kind == UndoableBuildKind.Settlement
+        ? NodeId!.Value.ToString()
+        : EdgeId!.Value.ToString();
+
+    public static UndoableBuild ForSettlement(Guid playerId, NodeId nodeId, int turnNumber, RoadTitle priorTitle) =>
+        new(playerId, UndoableBuildKind.Settlement, nodeId, null, turnNumber, DateTimeOffset.UtcNow, priorTitle);
+
+    public static UndoableBuild ForRoad(Guid playerId, EdgeId edgeId, int turnNumber, RoadTitle priorTitle) =>
+        new(playerId, UndoableBuildKind.Road, null, edgeId, turnNumber, DateTimeOffset.UtcNow, priorTitle);
+}
+
+/// <summary>One victim's contribution to a Monopoly haul.</summary>
+public sealed record MonopolyTake(Guid FromPlayerId, int Amount);
+
+/// <summary>What a Monopoly actually collected, and from whom.</summary>
+public sealed record MonopolyHaul(Guid PlayerId, ResourceType Resource, IReadOnlyList<MonopolyTake> Takes)
+{
+    public int Collected => Takes.Sum(take => take.Amount);
+}

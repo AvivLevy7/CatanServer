@@ -371,3 +371,84 @@ export function ArrowRightIcon(props) {
     </Icon>
   );
 }
+
+/** Victory points: a laurel-flanked heraldic shield. */
+export function ShieldIcon(props) {
+  return (
+    <Icon filled {...props}>
+      <path d="M12 2.4 4.8 4.9v6.4c0 4.3 2.9 8.2 7.2 10.3 4.3-2.1 7.2-6 7.2-10.3V4.9z" />
+    </Icon>
+  );
+}
+
+/** Held achievement: a laurel wreath that frames the trophy badges. */
+export function LaurelIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M8.4 20.4C4.9 18.4 3.2 15 3.6 11c1.9.5 3.3 1.5 4.2 3M8.4 20.4c-2.6-2.8-3.3-6-2-9" />
+      <path d="M15.6 20.4c3.5-2 5.2-5.4 4.8-9.4-1.9.5-3.3 1.5-4.2 3M15.6 20.4c2.6-2.8 3.3-6 2-9" />
+      <path d="M12 3.2v4" />
+    </Icon>
+  );
+}
+
+/** Cards in hand, face down: the back of a stack nobody else can read. */
+export function FaceDownCardsIcon(props) {
+  return (
+    <Icon {...props}>
+      <rect x="3.2" y="6.6" width="11" height="14.2" rx="1.8" />
+      <path d="M7.4 6.6V5a1.8 1.8 0 0 1 1.8-1.8h9.6A1.8 1.8 0 0 1 20.6 5v11.6a1.8 1.8 0 0 1-1.8 1.8h-4.6" />
+      <path d="M6 10.6h5.4M6 13.8h5.4M6 17h3.4" />
+    </Icon>
+  );
+}
+
+/** Background music. */
+export function MusicIcon(props) {
+  return (
+    <Icon {...props}>
+      <circle cx="7" cy="18" r="2.8" />
+      <circle cx="18" cy="15.6" r="2.8" />
+      <path d="M9.8 18V7.2l11-2.4v10.8" />
+    </Icon>
+  );
+}
+
+/** Zoom out, and the volume-down end of the music slider. */
+export function MinusIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M5.4 12h13.2" />
+    </Icon>
+  );
+}
+
+/** Recentre the camera on the island. */
+export function RecenterIcon(props) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 2.6v3.4M12 18v3.4M2.6 12H6M18 12h3.4" />
+    </Icon>
+  );
+}
+
+/** Take the last build back. */
+export function UndoIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M4 9.2h8.6a5.4 5.4 0 1 1 0 10.8H7.2" />
+      <path d="M7.6 4.8 3.4 9.2l4.2 4.4" />
+    </Icon>
+  );
+}
+
+/** A seat whose browser is not currently connected. */
+export function UnplugIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M8.4 15.6 4.6 19.4M15.6 8.4l3.8-3.8" />
+      <path d="M10.2 5.6 18.4 13.8a3 3 0 0 1 0 4.2l-.4.4a3 3 0 0 1-4.2 0L5.6 10.2a3 3 0 0 1 0-4.2l.4-.4a3 3 0 0 1 4.2 0z" />
+    </Icon>
+  );
+}

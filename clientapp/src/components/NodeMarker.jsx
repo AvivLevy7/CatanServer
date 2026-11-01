@@ -39,6 +39,9 @@ export default function NodeMarker({
   return (
     <g
       transform={`translate(${x.toFixed(3)}, ${y.toFixed(3)})`}
+      // Published so the camera (and the flying-resource layer) can find this
+      // intersection in the live DOM whatever the board is panned or zoomed to.
+      data-node-id={node.id}
       onClick={(e) => {
         e.stopPropagation();
         onClick?.(node);

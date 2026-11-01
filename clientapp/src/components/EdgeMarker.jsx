@@ -36,6 +36,8 @@ export default function EdgeMarker({
 
   return (
     <g
+      // Published so the camera can pan to a road the moment it appears.
+      data-edge-id={edge.id}
       onClick={(e) => {
         e.stopPropagation();
         onClick?.(edge);

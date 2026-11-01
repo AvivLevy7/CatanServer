@@ -35,6 +35,9 @@ builder.Services.AddSingleton<TurnTimerService>();
 builder.Services.AddSingleton<TradeTimerService>();
 // Computer players; drives bot seats off the same game service and broadcasts.
 builder.Services.AddSingleton<AiBotService>();
+// Clears out games everybody has walked away from (see RoomReaperService for why they
+// are not dropped the moment the last player disconnects).
+builder.Services.AddHostedService<RoomReaperService>();
 
 builder.Services.AddCors(options =>
 {

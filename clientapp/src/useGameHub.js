@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr';
 import { sound } from './audio';
+import { haptics } from './haptics';
+import {
+  HEARTBEAT_MS,
+  beatHeartbeat,
+  clearSession,
+  restoreIntent,
+  saveSession,
+} from './session';
 
 // Base URL of the C# server, e.g. https://catan-api.onrender.com (no trailing slash).
 // Empty in development: the Vite dev proxy forwards /hubs (with ws: true) to the server,
@@ -23,11 +31,17 @@ export const DICE_REVEAL_MS = 650;
 export const DICE_ANIMATION_MS = DICE_TUMBLE_MS + DICE_REVEAL_MS;
 const TRADE_OFFERED_EVENT = 'TradeOffered';
 const TRADE_RESOLVED_EVENT = 'TradeResolved';
+const MONOPOLY_EVENT = 'MonopolyPlayed';
 
 // How long an emote bubble stays up, and the longest a negotiation icon may linger
 // before it clears itself in case the matching "done" event never arrives.
 const EMOTE_VISIBLE_MS = 3000;
 const NEGOTIATION_MAX_MS = 45000;
+
+/** The seat stored for this browser, or null. Read fresh: a reconnect may be minutes later. */
+function readStoredSession() {
+  return restoreIntent().session;
+}
 
 /** Copy of `map` without `key`; returns `map` itself when the key was not there. */
 function without(map, key) {
@@ -43,14 +57,17 @@ function without(map, key) {
  */
 export function useGameHub() {
   const [room, setRoom] = useState(null);
-  // { roomId, playerId } for this browser; persisted so a refresh can rejoin.
-  const [session, setSession] = useState(() => {
-    try {
-      return JSON.parse(sessionStorage.getItem('catan.session')) ?? null;
-    } catch {
-      return null;
-    }
-  });
+  // { roomId, playerId, token } for this seat. Set once the server has accepted the claim,
+  // never straight from storage: a stored seat is only ours if the hub says so.
+  const [session, setSession] = useState(null);
+  // What the stored seat (if any) should do on this page load - see session.js. Decided
+  // once, on mount: a later re-render must not change its mind about whose seat this is.
+  const [restoreOnLoad] = useState(restoreIntent);
+  // A seat another tab of this browser is currently playing. Offered as a choice on the
+  // landing page rather than taken, so opening a second tab cannot kick the first.
+  const [resumable, setResumable] = useState(() =>
+    restoreOnLoad.kind === 'offer' ? restoreOnLoad.session : null,
+  );
   const [board, setBoard] = useState(null);
   const [game, setGame] = useState(null);
   const [lastRoll, setLastRoll] = useState(null);
@@ -71,6 +88,10 @@ export function useGameHub() {
   const [wishlists, setWishlists] = useState({});
   // Bumps on every 7 so the screen can replay its vignette; 0 means "no 7 yet".
   const [sevenPulse, setSevenPulse] = useState(0);
+  // The Monopoly just played: { id, playerId, playerName, resource, collected, takes }.
+  // The id is monotonic so a second Monopoly cannot be swallowed by the first's cleanup.
+  const [monopoly, setMonopoly] = useState(null);
+  const monopolySeq = useRef(0);
   const emoteTimers = useRef(new Map());
   const negotiationTimers = useRef(new Map());
   const [isRolling, setIsRolling] = useState(false);
@@ -88,6 +109,35 @@ export function useGameHub() {
   const [error, setError] = useState(null);
   const [actionError, setActionError] = useState(null);
   const connectionRef = useRef(null);
+
+  /**
+   * Hands the stored token to the hub to take (or retake) the seat it belongs to. A refusal
+   * means the claim is dead - the room has gone, or the seat is not ours - so the stored
+   * session is dropped and the player lands back on the front page rather than staring at a
+   * screen that will never fill in.
+   */
+  const claim = useCallback(async (connection, saved, { quiet = false } = {}) => {
+    if (!saved?.roomId || !saved?.playerId || !saved?.token) return false;
+
+    try {
+      const joined = await connection.invoke('RejoinRoom', saved.roomId, saved.playerId, saved.token);
+      const next = { roomId: joined.roomId, playerId: joined.playerId, token: joined.sessionToken };
+      saveSession(next);
+      setSession(next);
+      setRoom(joined.room);
+      setResumable(null);
+      return true;
+    } catch (err) {
+      clearSession();
+      setSession(null);
+      setRoom(null);
+      setResumable(null);
+      if (!quiet) {
+        setActionError(err?.message?.replace(/^.*HubException: /, '') ?? 'That game is no longer available.');
+      }
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
     const connection = new HubConnectionBuilder()
@@ -147,6 +197,7 @@ export function useGameHub() {
         // the moment the total is readable.
         if (event?.roll?.total === 7) {
           sound.play('seven');
+          haptics.play('seven');
           setSevenPulse((n) => n + 1);
         }
       }, DICE_TUMBLE_MS);
@@ -265,8 +316,17 @@ export function useGameHub() {
 
     connection.on(TRADE_RESOLVED_EVENT, (result) => {
       if (!cancelled) {
+        // A deal actually closing is worth a buzz; a decline is not.
+        if (result?.outcome === 'Confirmed') haptics.play('click');
         setLastTradeResult(result);
       }
+    });
+
+    connection.on(MONOPOLY_EVENT, (event) => {
+      if (cancelled || event?.playerId == null) return;
+      sound.play('steal');
+      haptics.play('seven');
+      setMonopoly({ ...event, id: ++monopolySeq.current });
     });
 
     connection.onreconnecting(() => {
@@ -276,15 +336,9 @@ export function useGameHub() {
     connection.onreconnected(async () => {
       if (cancelled) return;
       setStatus('connected');
-      // Re-sync: a new connection id means we must re-enter the room group.
-      try {
-        const saved = JSON.parse(sessionStorage.getItem('catan.session'));
-        if (saved?.roomId && saved?.playerId) {
-          await connection.invoke('RejoinRoom', saved.roomId, saved.playerId);
-        }
-      } catch {
-        /* the next push will correct us */
-      }
+      // A new connection id means the seat must be claimed again before the hub will
+      // talk to us: same token, same seat, same hand.
+      await claim(connection, readStoredSession(), { quiet: true });
     });
 
     connection.onclose(() => {
@@ -296,15 +350,10 @@ export function useGameHub() {
       .then(async () => {
         if (cancelled) return;
         setStatus('connected');
-        // Resume a room from a previous page load, if any.
-        try {
-          const saved = JSON.parse(sessionStorage.getItem('catan.session'));
-          if (saved?.roomId && saved?.playerId) {
-            await connection.invoke('RejoinRoom', saved.roomId, saved.playerId);
-          }
-        } catch {
-          sessionStorage.removeItem('catan.session');
-          if (!cancelled) setSession(null);
+        // Reclaim the seat this browser was last sitting in - unless another tab is
+        // playing it, in which case it stays on offer instead.
+        if (restoreOnLoad.kind === 'resume') {
+          await claim(connection, restoreOnLoad.session);
         }
       })
       .catch((err) => {
@@ -326,6 +375,7 @@ export function useGameHub() {
       connection.off(GAME_OVER_EVENT);
       connection.off(TRADE_OFFERED_EVENT);
       connection.off(TRADE_RESOLVED_EVENT);
+      connection.off(MONOPOLY_EVENT);
       connection.off('ChatMessage');
       connection.off('SystemMessage');
       connection.off('Emote');
@@ -338,7 +388,29 @@ export function useGameHub() {
       connection.stop();
       connectionRef.current = null;
     };
+    // `claim` is stable (useCallback with no dependencies); the socket is built once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Takes the seat another tab was holding (the landing page's "rejoin" button). */
+  const resumeSession = useCallback(async () => {
+    const connection = connectionRef.current;
+    if (connection?.state !== HubConnectionState.Connected) return false;
+    return claim(connection, resumable ?? readStoredSession());
+  }, [claim, resumable]);
+
+  const dismissResumable = useCallback(() => {
+    clearSession();
+    setResumable(null);
+  }, []);
+
+  // While this tab holds a seat it says so, so a second tab knows not to take it.
+  useEffect(() => {
+    if (!session || status !== 'connected') return undefined;
+    beatHeartbeat();
+    const id = setInterval(beatHeartbeat, HEARTBEAT_MS);
+    return () => clearInterval(id);
+  }, [session, status]);
 
   const resetBoard = useCallback(() => {
     const connection = connectionRef.current;
@@ -382,7 +454,10 @@ export function useGameHub() {
   const invokeBuild = useCallback(
     async (method, cue, ...args) => {
       const placed = await invokeMove(method, ...args);
-      if (placed) sound.play(cue);
+      if (placed) {
+        sound.play(cue);
+        haptics.play('click');
+      }
       return placed;
     },
     [invokeMove],
@@ -451,28 +526,55 @@ export function useGameHub() {
     (edgeId) => invokeBuild('PlaceInitialRoad', 'road', edgeId),
     [invokeBuild],
   );
+  // Take the last road/settlement back. The server owns the window, so a late click is
+  // simply refused rather than silently doing nothing.
+  const undoBuild = useCallback(() => invokeMove('UndoBuild'), [invokeMove]);
 
-  // Lobby. Create/Join return { roomId, playerId, room }; we remember our seat.
+  // Lobby. Create/Join return { roomId, playerId, sessionToken, room }; the seat and its
+  // token are remembered so a refresh or a dropped socket can claim it back.
   const enterRoom = useCallback(async (method, ...args) => {
     const connection = connectionRef.current;
-    if (connection?.state !== HubConnectionState.Connected) return false;
+    if (connection?.state !== HubConnectionState.Connected) return null;
     setActionError(null);
     try {
       const joined = await connection.invoke(method, ...args);
-      const next = { roomId: joined.roomId, playerId: joined.playerId };
-      sessionStorage.setItem('catan.session', JSON.stringify(next));
+      const next = { roomId: joined.roomId, playerId: joined.playerId, token: joined.sessionToken };
+      saveSession(next);
       setSession(next);
       setRoom(joined.room);
-      return true;
+      setResumable(null);
+      return next;
     } catch (err) {
       setActionError(err?.message?.replace(/^.*HubException: /, '') ?? 'Could not join');
-      return false;
+      return null;
     }
   }, []);
-  const createRoom = useCallback((name) => enterRoom('CreateRoom', name), [enterRoom]);
-  const joinRoom = useCallback((roomId, name) => enterRoom('JoinRoom', roomId, name), [enterRoom]);
+  /**
+   * Opens a room and, if the player asked for company on the landing page, seats that many
+   * bots straight away. The room id comes from the join result rather than from state,
+   * which has not been committed yet at this point.
+   */
+  const createRoom = useCallback(
+    async (name, bots = 0) => {
+      const joined = await enterRoom('CreateRoom', name);
+      if (!joined) return false;
+
+      for (let i = 0; i < bots; i++) {
+        // Sequential on purpose: each bot takes the next free seat and colour.
+        const seated = await invokeMove('AddBot', joined.roomId);
+        if (!seated) break;
+      }
+
+      return true;
+    },
+    [enterRoom, invokeMove],
+  );
+  const joinRoom = useCallback(
+    async (roomId, name) => (await enterRoom('JoinRoom', roomId, name)) !== null,
+    [enterRoom],
+  );
   const leaveRoom = useCallback(() => {
-    sessionStorage.removeItem('catan.session');
+    clearSession();
     setSession(null);
     setRoom(null);
     setBoard(null);
@@ -523,6 +625,10 @@ export function useGameHub() {
     room,
     session,
     myPlayerId: session?.playerId ?? null,
+    // A seat left behind in this browser that another tab is using; null when there is none.
+    resumable,
+    resumeSession,
+    dismissResumable,
     createRoom,
     joinRoom,
     leaveRoom,
@@ -575,6 +681,9 @@ export function useGameHub() {
     lastRobbery,
     placeInitialSettlement,
     placeInitialRoad,
+    undoBuild,
+    monopoly,
+    clearMonopoly: () => setMonopoly(null),
     startGame,
   };
 }

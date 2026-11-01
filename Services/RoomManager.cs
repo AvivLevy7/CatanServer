@@ -20,9 +20,17 @@ public sealed class RoomMember
         Color = color;
         ConnectionId = connectionId;
         IsBot = isBot;
+        SessionToken = RoomManager.NewSessionToken();
     }
 
     public Guid Id { get; }
+
+    /// <summary>
+    /// Secret this seat is reclaimed with after a refresh or a dropped connection. The seat
+    /// id alone is not enough: it travels to every client in the room state, so anyone could
+    /// otherwise claim anyone else's seat (and with it their hand).
+    /// </summary>
+    public string SessionToken { get; }
 
     public string Name { get; }
 
@@ -51,6 +59,26 @@ public sealed class Room
     public string Id { get; }
 
     public RoomStatus Status { get; private set; } = RoomStatus.Lobby;
+
+    /// <summary>
+    /// When the last human connection went away, or null while somebody is still here. A
+    /// game whose players have all dropped is not thrown away immediately: it is held for a
+    /// grace period (see <see cref="RoomReaperService"/>) so a refresh, a flaky network or a
+    /// phone waking up walks straight back into the same seat and the same hand.
+    /// </summary>
+    public DateTimeOffset? AbandonedSince { get; private set; }
+
+    /// <summary>True while at least one human seat has a live connection.</summary>
+    public bool HasConnectedHuman
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _members.Any(m => !m.IsBot && m.ConnectionId is not null);
+            }
+        }
+    }
 
     public IGameStateService Game { get; }
 
@@ -144,6 +172,7 @@ public sealed class Room
             var color = RoomManager.SeatColors.First(c => _members.All(m => m.Color != c));
             var member = new RoomMember(Guid.NewGuid(), name, color, connectionId);
             _members.Add(member);
+            AbandonedSince = null;
             return member;
         }
     }
@@ -217,39 +246,54 @@ public sealed class Room
         }
     }
 
-    /// <summary>Reattaches a disconnected member to a new connection.</summary>
-    public RoomMember Rejoin(Guid playerId, string connectionId)
+    /// <summary>
+    /// Reattaches a member to a new connection, on proof of their session token. Bots have
+    /// no browser to come back from, so their seats cannot be claimed this way.
+    /// </summary>
+    public RoomMember Rejoin(Guid playerId, string connectionId, string? sessionToken)
     {
         lock (_gate)
         {
             var member = _members.FirstOrDefault(m => m.Id == playerId)
                 ?? throw new GameRuleException("You are not a member of that room.");
+
+            if (member.IsBot || string.IsNullOrEmpty(sessionToken)
+                || !string.Equals(member.SessionToken, sessionToken, StringComparison.Ordinal))
+            {
+                throw new GameRuleException("That seat belongs to someone else.");
+            }
+
             member.ConnectionId = connectionId;
+            AbandonedSince = null;
             return member;
         }
     }
 
-    /// <summary>Marks the member disconnected. In the lobby they are removed outright. Returns true if the room is now empty.</summary>
+    /// <summary>
+    /// Marks the member disconnected. In the lobby they are removed outright - a lobby seat
+    /// is not worth coming back to. Returns true if nobody is left watching, which also
+    /// starts the abandonment clock.
+    /// </summary>
     public bool HandleDisconnect(string connectionId)
     {
         lock (_gate)
         {
             var member = _members.FirstOrDefault(m => m.ConnectionId == connectionId);
-            if (member is null)
+            if (member is not null)
             {
-                return _members.Count == 0;
+                if (Status == RoomStatus.Lobby)
+                {
+                    _members.Remove(member);
+                }
+                else
+                {
+                    member.ConnectionId = null;
+                }
             }
 
-            if (Status == RoomStatus.Lobby)
-            {
-                _members.Remove(member);
-            }
-            else
-            {
-                member.ConnectionId = null;
-            }
-
-            return _members.All(m => m.IsBot || m.ConnectionId is null);
+            var empty = _members.All(m => m.IsBot || m.ConnectionId is null);
+            AbandonedSince = empty ? AbandonedSince ?? DateTimeOffset.UtcNow : null;
+            return empty;
         }
     }
 
@@ -377,7 +421,11 @@ public sealed class RoomManager
     public Room? RoomFor(string connectionId) =>
         _roomByConnection.TryGetValue(connectionId, out var id) && _rooms.TryGetValue(id, out var room) ? room : null;
 
-    /// <summary>Detaches the connection; drops the room when nobody is left.</summary>
+    /// <summary>
+    /// Detaches the connection. An empty lobby is dropped at once, but an empty *game* is
+    /// kept: its players hold session tokens and may be one refresh away from coming back.
+    /// <see cref="ReapAbandoned"/> clears it out once the grace period has passed.
+    /// </summary>
     public Room? Disconnect(string connectionId)
     {
         _playerByConnection.TryRemove(connectionId, out _);
@@ -386,7 +434,7 @@ public sealed class RoomManager
             return null;
         }
 
-        if (room.HandleDisconnect(connectionId))
+        if (room.HandleDisconnect(connectionId) && room.Status == RoomStatus.Lobby)
         {
             _rooms.TryRemove(id, out _);
         }
@@ -394,7 +442,31 @@ public sealed class RoomManager
         return room;
     }
 
+    /// <summary>
+    /// Drops games that have been sitting empty for longer than <paramref name="grace"/>.
+    /// Returns their ids so the caller can stop their clocks too.
+    /// </summary>
+    public IReadOnlyList<string> ReapAbandoned(TimeSpan grace)
+    {
+        var cutoff = DateTimeOffset.UtcNow - grace;
+        var removed = new List<string>();
+
+        foreach (var (id, room) in _rooms)
+        {
+            if (room.AbandonedSince is { } since && since <= cutoff && _rooms.TryRemove(id, out _))
+            {
+                removed.Add(id);
+            }
+        }
+
+        return removed;
+    }
+
     public static string Normalise(string roomId) => roomId.Trim().ToUpperInvariant();
+
+    /// <summary>A fresh seat secret. Cryptographically random: it is a bearer token.</summary>
+    internal static string NewSessionToken() =>
+        Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
 
     private static string NewCode() =>
         string.Create(CodeLength, Random.Shared, static (span, random) =>
