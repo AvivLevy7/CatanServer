@@ -29,6 +29,7 @@ public sealed record PlayerDto(
     IReadOnlyDictionary<string, int> BankRates,
     int ResourceCardCount,
     int UnplayedDevCardCount,
+    int PlayedDevCardCount,
     VictoryPointBreakdownDto VictoryPointBreakdown)
 {
     /// <summary>
@@ -106,7 +107,30 @@ public record GameStateDto(
     bool HasRolledDice,
     DateTimeOffset? TurnDeadline,
     IReadOnlyDictionary<int, int> DiceRollFrequencies,
-    IReadOnlyList<string> LongestRoadPath);
+    IReadOnlyList<string> LongestRoadPath,
+    UndoableBuildDto? UndoableBuild,
+    int TurnClockSeconds,
+    bool TurnDeadlineExtended);
+
+/// <summary>
+/// A road or settlement the player whose turn it is may still take back, and until when.
+/// Public, because the piece appearing and vanishing again is visible to the whole table.
+/// </summary>
+public sealed record UndoableBuildDto(Guid PlayerId, string Kind, string PieceId, DateTimeOffset ExpiresAt);
+
+/// <summary>What one victim lost to a Monopoly.</summary>
+public sealed record MonopolyTakeDto(Guid FromPlayerId, int Amount);
+
+/// <summary>
+/// Broadcast when a Monopoly is played, so every screen can drain the cards out of the
+/// victims' seats and into the caller's hand.
+/// </summary>
+public sealed record MonopolyPlayedDto(
+    Guid PlayerId,
+    string PlayerName,
+    string Resource,
+    int Collected,
+    IReadOnlyList<MonopolyTakeDto> Takes);
 
 /// <summary>
 /// What one player is allowed to see: their own hand in full, every opponent reduced to

@@ -38,6 +38,9 @@ public interface IGameClient
 
     Task RobberMoved(RobberMovedDto robber);
 
+    /// <summary>A Monopoly was played: who took what, and from whom.</summary>
+    Task MonopolyPlayed(MonopolyPlayedDto monopoly);
+
     Task GameOver(PlayerDto winner);
 
     /// <summary>A new player-to-player offer is on the table.</summary>

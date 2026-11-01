@@ -3,6 +3,7 @@ import Board from './components/Board';
 import ZoomableBoard from './components/ZoomableBoard';
 import RotateDeviceOverlay from './components/RotateDeviceOverlay';
 import ActionDock from './components/ActionDock';
+import AudioControls from './components/AudioControls';
 import DiceCinematic from './components/DiceCinematic';
 import FullscreenButton from './components/FullscreenButton';
 import CardHand from './components/CardHand';
@@ -17,6 +18,8 @@ import { tradeStatusOf } from './tradeStatus';
 import EmoteBubbleLayer from './components/EmoteBubbleLayer';
 import EmoteWheel from './components/EmoteWheel';
 import FlyingResources from './components/FlyingResources';
+import MonopolyDrain from './components/MonopolyDrain';
+import UndoBuildButton from './components/UndoBuildButton';
 import GameOverOverlay from './components/GameOverOverlay';
 import PhaseBanner from './components/PhaseBanner';
 import PlayerStatusBar from './components/PlayerStatusBar';
@@ -35,6 +38,8 @@ import { useRoadClaim } from './useRoadClaim';
 import { useMiniLog } from './useMiniLog';
 import { ArrowRightIcon, ExitIcon, HammerIcon } from './components/icons';
 import { sound } from './audio';
+import { music } from './music';
+import { haptics } from './haptics';
 import { RESOURCE_STYLE } from './theme';
 
 const RESOURCE_LABELS = {
@@ -80,7 +85,10 @@ function StatusScreen({ status, error }) {
   const isError = status === 'error' || status === 'disconnected';
 
   return (
-    <main className="bg-tavern flex h-[100dvh] min-h-[100dvh] w-[100dvw] flex-col items-center justify-center gap-4 overflow-hidden p-[max(1.5rem,env(safe-area-inset-top))_max(1.5rem,env(safe-area-inset-right))_max(1.5rem,env(safe-area-inset-bottom))_max(1.5rem,env(safe-area-inset-left))] text-center">
+    <main className="bg-tavern lobby-stage relative flex h-[100dvh] min-h-[100dvh] w-[100dvw] flex-col items-center justify-center gap-4 overflow-hidden p-[max(1.5rem,env(safe-area-inset-top))_max(1.5rem,env(safe-area-inset-right))_max(1.5rem,env(safe-area-inset-bottom))_max(1.5rem,env(safe-area-inset-left))] text-center">
+      <div className="fixed right-[max(0.75rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-10">
+        <AudioControls />
+      </div>
       {!isError && (
         <span
           className="size-10 animate-spin rounded-full border-4 border-amber-900/60 border-t-amber-300"
@@ -105,6 +113,9 @@ export default function App() {
     room,
     session,
     myPlayerId,
+    resumable,
+    resumeSession,
+    dismissResumable,
     createRoom,
     joinRoom,
     leaveRoom,
@@ -142,6 +153,9 @@ export default function App() {
     rollCinematic,
     placeInitialSettlement,
     placeInitialRoad,
+    undoBuild,
+    monopoly,
+    clearMonopoly,
     startGame,
     addBot,
     removeBot,
@@ -188,9 +202,13 @@ export default function App() {
       return !on;
     });
 
-  // Browsers gate audio behind a user gesture: unlock on the first one.
+  // Browsers gate audio behind a user gesture: unlock on the first one. The background
+  // music starts on the same gesture (and only if it was left switched on).
   useEffect(() => {
-    const unlock = () => sound.unlock();
+    const unlock = () => {
+      sound.unlock();
+      music.unlock();
+    };
     window.addEventListener('pointerdown', unlock, { once: true });
     window.addEventListener('keydown', unlock, { once: true });
     return () => {
@@ -257,7 +275,11 @@ export default function App() {
   useEffect(() => {
     if (!turnForLog) return;
     appendLog(`${nameOf(turnForLog)}'s turn.`);
-    if (turnForLog === myPlayerId) sound.play('turn');
+    if (turnForLog === myPlayerId) {
+      sound.play('turn');
+      // Two short taps: the phone in your pocket telling you the table is waiting.
+      haptics.play('turn');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turnForLog]);
 
@@ -296,6 +318,32 @@ export default function App() {
 
   // Glanceable feed of the last few events, in icons rather than sentences.
   const miniLog = useMiniLog(MINI_LOG_LIFE_MS);
+
+  // Where the camera should look: a piece someone *else* has just put down. The board
+  // decides whether it is worth moving for (see ZoomableBoard) - a piece already in
+  // comfortable view does not drag the camera about. Own placements are skipped: the
+  // player is looking at the spot they just tapped.
+  const [cameraFocus, setCameraFocus] = useState(null);
+  const focusSeq = useRef(0);
+  useEffect(() => {
+    if (placementImpact.nodes.size === 0 && placementImpact.edges.size === 0) return;
+
+    const node = (juiceNodes ?? []).find(
+      (n) => placementImpact.nodes.has(n.id) && n.ownerId != null && n.ownerId !== myPlayerId,
+    );
+    const edge = node
+      ? null
+      : (juiceEdges ?? []).find(
+          (e) => placementImpact.edges.has(e.id) && e.ownerId != null && e.ownerId !== myPlayerId,
+        );
+    if (!node && !edge) return;
+
+    setCameraFocus({
+      id: ++focusSeq.current,
+      selector: node ? `[data-node-id="${node.id}"]` : `[data-edge-id="${edge.id}"]`,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placementImpact]);
 
   // A roll resolving lights the matching hexes and sends their goods flying to whoever
   // collected them. Both are keyed off a monotonic id so a fast follow-up roll cannot
@@ -445,12 +493,33 @@ export default function App() {
     return <StatusScreen status={status} error={error} />;
   }
 
+  // The audio widget rides along on every screen, so the music can be turned down
+  // before the game even starts.
+  const withAudio = (screen) => (
+    <>
+      {screen}
+      <div className="fixed right-[max(0.75rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-40">
+        <AudioControls />
+      </div>
+    </>
+  );
+
   if (!room || !session) {
-    return <LandingPage onCreate={createRoom} onJoin={joinRoom} disabled={!isLive} error={actionError} />;
+    return withAudio(
+      <LandingPage
+        onCreate={createRoom}
+        onJoin={joinRoom}
+        disabled={!isLive}
+        error={actionError}
+        resumable={resumable}
+        onResume={resumeSession}
+        onDismissResume={dismissResumable}
+      />,
+    );
   }
 
   if (room.status !== 'InGame') {
-    return (
+    return withAudio(
       <WaitingRoom
         room={room}
         myPlayerId={session.playerId}
@@ -459,7 +528,7 @@ export default function App() {
         onAddBot={addBot}
         onRemoveBot={removeBot}
         disabled={!isLive}
-      />
+      />,
     );
   }
 
@@ -498,6 +567,15 @@ export default function App() {
   const isGameOver = phase === 'GameOver';
   const isMainGame = phase === 'MainGame';
   const winningPlayer = winner ?? players.find((p) => p.id === game?.winnerId) ?? null;
+
+  // Who still has a socket. The lobby state tracks it (bots always count as present),
+  // and the seat cards grey out whoever has dropped.
+  const connections = Object.fromEntries((room.players ?? []).map((p) => [p.id, p.isConnected !== false]));
+
+  // A build of mine that is still inside its take-back window. The field is public - the
+  // whole table saw the piece go down - but only its owner is offered the undo.
+  const myUndoableBuild =
+    game?.undoableBuild?.playerId === myPlayerId ? game.undoableBuild : null;
 
   // Identity: this tab may only act as its own seat.
   const me = players.find((p) => p.id === myPlayerId) ?? null;
@@ -711,7 +789,10 @@ export default function App() {
         aria-label="Board"
         className="board-backdrop ocean-alive fixed inset-0 z-0 h-[100dvh] w-[100dvw] touch-none overflow-hidden"
       >
-        <ZoomableBoard padClass="px-6 pb-28 pt-[5.5rem] max-md:px-2 max-md:pb-20 max-md:pt-14">
+        <ZoomableBoard
+          padClass="px-6 pb-28 pt-[7rem] max-md:px-2 max-md:pb-20 max-md:pt-[4.5rem]"
+          focus={cameraFocus}
+        >
           <Board
             tiles={tiles}
             nodes={liveBoard.nodes ?? []}
@@ -748,6 +829,7 @@ export default function App() {
             negotiators={negotiators}
             wishlists={wishlists}
             tradeStatuses={tradeStatuses}
+            connections={connections}
           />
         ) : (
           <p className="panel-glass pointer-events-auto rounded-lg px-3 py-1 text-xs italic text-parchment-300">
@@ -758,6 +840,8 @@ export default function App() {
         <div className="flex shrink-0 items-start gap-1.5 max-md:gap-1">
           <TurnTimer
             deadline={game?.turnDeadline}
+            total={game?.turnClockSeconds || 60}
+            extended={game?.turnDeadlineExtended === true}
             label={
               isMovingRobber || isDiscarding
                 ? 'Robber clock'
@@ -777,6 +861,7 @@ export default function App() {
             />
             <span className="font-mono font-bold tracking-widest text-amber-200">{room.roomId}</span>
           </div>
+          <AudioControls />
           <FullscreenButton />
           <button
             type="button"
@@ -791,7 +876,7 @@ export default function App() {
       </div>
 
       {/* ---- Centre-top stack: phase banner, errors, tile inspector ---- */}
-      <div className="pointer-events-none fixed left-1/2 top-[calc(3.5rem+env(safe-area-inset-top))] z-20 flex w-[min(92vw,38rem)] -translate-x-1/2 flex-col items-center gap-1.5 max-md:top-[calc(2.75rem+env(safe-area-inset-top))] max-md:gap-1">
+      <div className="pointer-events-none fixed left-1/2 top-[calc(4.75rem+env(safe-area-inset-top))] z-20 flex w-[min(92vw,38rem)] -translate-x-1/2 flex-col items-center gap-1.5 max-md:top-[calc(3.5rem+env(safe-area-inset-top))] max-md:gap-1">
         <PhaseBanner
           game={game}
           currentPlayer={currentPlayer}
@@ -824,6 +909,11 @@ export default function App() {
             <span aria-hidden="true" className="text-emerald-300">&times;</span>
             <span className="sr-only">Cancel this build</span>
           </button>
+        )}
+
+        {/* Misclicked a road or settlement? A few seconds to put it back. */}
+        {myUndoableBuild && (
+          <UndoBuildButton undoable={myUndoableBuild} onUndo={undoBuild} disabled={!isLive} />
         )}
 
         {selected && (
@@ -916,6 +1006,9 @@ export default function App() {
 
       {/* ---- Production in flight: hex centres to the seats that collected ---- */}
       <FlyingResources burst={flightBurst} onDone={() => setFlightBurst(null)} />
+
+      {/* ---- Monopoly: every victim's cards drain into the caller's hand ---- */}
+      <MonopolyDrain event={monopoly} myPlayerId={myPlayerId} onDone={clearMonopoly} />
 
       {/* ---- Emotes: a bubble over the sender's seat chip ---- */}
       <EmoteBubbleLayer emotes={emotes} />

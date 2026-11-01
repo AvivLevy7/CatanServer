@@ -52,6 +52,13 @@ public sealed class GameHub : Hub<IGameClient>
             if (room.Status == RoomStatus.InGame && playerId is { } pid)
             {
                 _timers.OnPlayerDisconnected(room, pid);
+                // Sync also runs the discard autopilot, so a 7 cannot leave the table
+                // waiting on a browser that has gone away. Skipped when that disconnect
+                // emptied the room, which drops it: there is nobody left to wait for.
+                if (_rooms.TryGet(room.Id, out _))
+                {
+                    _timers.Sync(room);
+                }
             }
         }
 
@@ -69,7 +76,7 @@ public sealed class GameHub : Hub<IGameClient>
         await Enter(room, member.Id);
 
         _logger.LogInformation("Room {RoomId} created by {Name}", room.Id, name);
-        return new JoinedRoomDto(room.Id, member.Id, room.ToDto());
+        return new JoinedRoomDto(room.Id, member.Id, member.SessionToken, room.ToDto());
     }
 
     /// <summary>Joins an existing lobby if it has a free seat.</summary>
@@ -90,17 +97,22 @@ public sealed class GameHub : Hub<IGameClient>
 
         await Enter(room, member.Id);
         _logger.LogInformation("{Name} joined room {RoomId}", name, room.Id);
-        return new JoinedRoomDto(room.Id, member.Id, room.ToDto());
+        return new JoinedRoomDto(room.Id, member.Id, member.SessionToken, room.ToDto());
     }
 
-    /// <summary>Reattaches a previous player id (e.g. after a page refresh) to this connection.</summary>
-    public async Task<JoinedRoomDto> RejoinRoom(string roomId, Guid playerId)
+    /// <summary>
+    /// Reclaims a seat on a new connection - a page refresh, a dropped socket, a phone
+    /// waking up - on proof of the session token handed out when the player joined. The
+    /// seat, its private hand and the live game state all come back as they were.
+    /// </summary>
+    public async Task<JoinedRoomDto> RejoinRoom(string roomId, Guid playerId, string sessionToken)
     {
         Room room;
+        RoomMember member;
         try
         {
             room = _rooms.Get(roomId);
-            room.Rejoin(playerId, Context.ConnectionId);
+            member = room.Rejoin(playerId, Context.ConnectionId, sessionToken);
         }
         catch (GameRuleException ex)
         {
@@ -111,9 +123,12 @@ public sealed class GameHub : Hub<IGameClient>
         if (room.Status == RoomStatus.InGame)
         {
             _timers.OnPlayerReconnected(room, playerId);
+            // The clock is stopped while a game sits abandoned; coming back restarts it.
+            _timers.Sync(room);
         }
 
-        return new JoinedRoomDto(room.Id, playerId, room.ToDto());
+        _logger.LogInformation("{Name} reclaimed their seat in room {RoomId}", member.Name, room.Id);
+        return new JoinedRoomDto(room.Id, playerId, member.SessionToken, room.ToDto());
     }
 
     /// <summary>Host fills an empty seat with a computer player.</summary>
@@ -491,7 +506,7 @@ public sealed class GameHub : Hub<IGameClient>
     {
         var (room, me) = CurrentActor();
 
-        (int Collected, GameStateDto State) result;
+        (MonopolyHaul Haul, GameStateDto State) result;
         try
         {
             result = room.Game.PlayMonopoly(me, cardId, resource);
@@ -501,8 +516,15 @@ public sealed class GameHub : Hub<IGameClient>
             throw new HubException(ex.Message);
         }
 
+        var haul = result.Haul;
+        await Clients.Group(room.Id).MonopolyPlayed(new MonopolyPlayedDto(
+            me,
+            NameOf(room, me),
+            haul.Resource.ToString(),
+            haul.Collected,
+            haul.Takes.Select(take => new MonopolyTakeDto(take.FromPlayerId, take.Amount)).ToList()));
         await Clients.Group(room.Id).SystemMessage(new SystemMessageDto(
-            $"Player {NameOf(room, me)} played Monopoly and stole {result.Collected} {resource} from everyone.",
+            $"Player {NameOf(room, me)} played Monopoly and stole {haul.Collected} {resource} from everyone.",
             "bad", DateTimeOffset.UtcNow));
         await BroadcastGameState(room, result.State);
     }
@@ -545,6 +567,32 @@ public sealed class GameHub : Hub<IGameClient>
 
     public Task PlaceInitialRoad(string edgeId) =>
         ApplyMove("PlaceInitialRoad", edgeId, (g, me) => g.PlaceInitialRoad(me, edgeId));
+
+    /// <summary>
+    /// Takes back the road or settlement the caller just placed - a misclick on a
+    /// touchscreen. The domain is the one that decides whether it is still allowed: the
+    /// window is short and anything random since (a card drawn, the dice rolled) closes it.
+    /// </summary>
+    public async Task UndoBuild()
+    {
+        var (room, me) = CurrentActor();
+
+        (UndoableBuild Undone, GameStateDto State) result;
+        try
+        {
+            result = room.Game.UndoBuild(me);
+        }
+        catch (GameRuleException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+
+        var piece = result.Undone.Kind == UndoableBuildKind.Settlement ? "settlement" : "road";
+        _logger.LogInformation("[{RoomId}] {Player} took back a {Piece}", room.Id, me, piece);
+        await Clients.Group(room.Id).SystemMessage(new SystemMessageDto(
+            $"{NameOf(room, me)} took back a {piece}.", "info", DateTimeOffset.UtcNow));
+        await BroadcastGameState(room, result.State);
+    }
 
     // ---------------------------------------------------------------- Helpers
 

@@ -57,8 +57,8 @@ public interface IGameStateService
 
     GameStateDto PlayKnightCard(Guid actorId, Guid cardId);
 
-    /// <summary>Returns how many cards were collected so the hub can announce it.</summary>
-    (int Collected, GameStateDto State) PlayMonopoly(Guid actorId, Guid cardId, string resource);
+    /// <summary>Returns the haul (who lost what) so the hub can announce and animate it.</summary>
+    (MonopolyHaul Haul, GameStateDto State) PlayMonopoly(Guid actorId, Guid cardId, string resource);
 
     GameStateDto PlayYearOfPlenty(Guid actorId, Guid cardId, string first, string second);
 
@@ -67,6 +67,15 @@ public interface IGameStateService
     GameStateDto PlaceInitialSettlement(Guid actorId, string nodeId);
 
     GameStateDto PlaceInitialRoad(Guid actorId, string edgeId);
+
+    /// <summary>Takes the actor's last road or settlement back, inside its short window.</summary>
+    (UndoableBuild Undone, GameStateDto State) UndoBuild(Guid actorId);
+
+    /// <summary>
+    /// Discards at random for one player who owes cards after a 7. Returns null when they
+    /// owed nothing (already discarded, or the phase has moved on).
+    /// </summary>
+    (int Discarded, GameStateDto State)? AutoDiscardFor(Guid playerId);
 
     /// <summary>Starts a fresh game on a new board with the given number of seats (3 or 4).</summary>
     GameStateDto StartGame(int playerCount, bool allowSevens = true);
@@ -80,10 +89,21 @@ public interface IGameStateService
     /// <summary>Server-side turn clock; the hub decides when to arm/reset it.</summary>
     DateTimeOffset? TurnDeadline { get; }
 
-    void SetTurnDeadline(DateTimeOffset? deadline);
+    /// <summary>
+    /// Publishes the clock the whole table is watching: when it runs out, how long it ran
+    /// for (the bar needs the full length, which differs between a turn, a discard window
+    /// and a negotiation extension) and whether it was extended for a live negotiation.
+    /// </summary>
+    void SetTurnDeadline(DateTimeOffset? deadline, int clockSeconds = 0, bool extended = false);
 
     /// <summary>Opaque marker that changes whenever the actor-to-wait-for changes.</summary>
     (GamePhase Phase, Guid Actor, bool Rolled, int Turn) TurnKey { get; }
+
+    /// <summary>Who still owes cards after a 7. Cheap: no full state projection.</summary>
+    IReadOnlyCollection<Guid> PlayersOwingDiscards { get; }
+
+    /// <summary>Whether an offer is on the table right now. Cheap, for the same reason.</summary>
+    bool HasActiveTradeOffer { get; }
 }
 
 /// <summary>
@@ -186,17 +206,21 @@ public sealed class GameStateService : IGameStateService
     }
 
     private DateTimeOffset? _turnDeadline;
+    private int _turnClockSeconds;
+    private bool _turnDeadlineExtended;
 
     public DateTimeOffset? TurnDeadline
     {
         get { lock (_gate) { return _turnDeadline; } }
     }
 
-    public void SetTurnDeadline(DateTimeOffset? deadline)
+    public void SetTurnDeadline(DateTimeOffset? deadline, int clockSeconds = 0, bool extended = false)
     {
         lock (_gate)
         {
             _turnDeadline = deadline;
+            _turnClockSeconds = clockSeconds;
+            _turnDeadlineExtended = extended;
         }
     }
 
@@ -209,6 +233,28 @@ public sealed class GameStateService : IGameStateService
                 // During discards/robber the clock belongs to whoever must act, not the roller.
                 var actor = _game.Phase == GamePhase.MovingRobber ? _game.RobberMover ?? _game.CurrentTurnPlayerId : _game.CurrentTurnPlayerId;
                 return (_game.Phase, actor, _game.HasRolledDice, _game.TurnNumber);
+            }
+        }
+    }
+
+    public IReadOnlyCollection<Guid> PlayersOwingDiscards
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _game.PendingDiscards.Keys.ToArray();
+            }
+        }
+    }
+
+    public bool HasActiveTradeOffer
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _game.ActiveTradeOffer is not null;
             }
         }
     }
@@ -464,13 +510,13 @@ public sealed class GameStateService : IGameStateService
         }
     }
 
-    public (int Collected, GameStateDto State) PlayMonopoly(Guid actorId, Guid cardId, string resource)
+    public (MonopolyHaul Haul, GameStateDto State) PlayMonopoly(Guid actorId, Guid cardId, string resource)
     {
         var parsed = ParseResource(resource);
         lock (_gate)
         {
-            var collected = _game.PlayMonopoly(actorId, cardId, parsed);
-            return (collected, ProjectGame(_game));
+            var haul = _game.PlayMonopoly(actorId, cardId, parsed);
+            return (haul, ProjectGame(_game));
         }
     }
 
@@ -529,6 +575,25 @@ public sealed class GameStateService : IGameStateService
         }
     }
 
+    public (UndoableBuild Undone, GameStateDto State) UndoBuild(Guid actorId)
+    {
+        lock (_gate)
+        {
+            var undone = _game.UndoLastBuild(actorId);
+            return (undone, ProjectGame(_game));
+        }
+    }
+
+    public (int Discarded, GameStateDto State)? AutoDiscardFor(Guid playerId)
+    {
+        lock (_gate)
+        {
+            return _game.AutoDiscardFor(playerId) is { } discarded
+                ? (discarded, ProjectGame(_game))
+                : null;
+        }
+    }
+
     private static BoardSnapshot CreateSnapshot() =>
         new(Guid.NewGuid(), BoardFactory.CreateStandardBoard());
 
@@ -569,6 +634,7 @@ public sealed class GameStateService : IGameStateService
                 game.BankRates(player.Id).ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
                 ResourceCardCount: player.Resources.Values.Sum(),
                 UnplayedDevCardCount: player.DevelopmentCards.Count(card => !card.IsPlayed),
+                PlayedDevCardCount: player.DevelopmentCards.Count(card => card.IsPlayed),
                 VictoryPointBreakdown: new VictoryPointBreakdownDto(
                     Settlements: game.SettlementsBuilt(player.Id),
                     Cities: game.CitiesBuilt(player.Id) * 2,
@@ -611,7 +677,16 @@ public sealed class GameStateService : IGameStateService
             game.HasRolledDice,
             _turnDeadline,
             new Dictionary<int, int>(game.DiceRollFrequencies),
-            game.LongestRoadPath.Select(edge => edge.ToString()).ToList());
+            game.LongestRoadPath.Select(edge => edge.ToString()).ToList(),
+            game.UndoableBuild is { } undoable
+                ? new UndoableBuildDto(
+                    undoable.PlayerId,
+                    undoable.Kind.ToString(),
+                    undoable.PieceId,
+                    undoable.ExpiresAt)
+                : null,
+            _turnClockSeconds,
+            _turnDeadlineExtended);
     }
 
     private static DiceRolledDto ProjectRoll(RollOutcome outcome) =>

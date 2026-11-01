@@ -2,14 +2,16 @@ import { seat, RESOURCE_STYLE } from '../theme';
 import { RESOURCES } from '../resources';
 import TradeStatusIcon from './TradeStatusIcon';
 import {
-  CardsIcon,
   CrownIcon,
   DevCardIcon,
   DiscardIcon,
+  FaceDownCardsIcon,
   KnightIcon,
+  LaurelIcon,
   RoadIcon,
   ScalesIcon,
-  StarIcon,
+  ShieldIcon,
+  UnplugIcon,
 } from './icons';
 
 const TONES = {
@@ -30,17 +32,40 @@ const NEGOTIATION_LABEL = {
  * One icon + count pill. `title` carries the meaning that used to be printed as a text
  * label, so the HUD stays wordless without losing it for screen readers or hover.
  */
-function Stat({ icon: Glyph, value, title, tone = 'slate', lit = false }) {
+function Stat({ icon: Glyph, value, suffix, title, tone = 'slate', className = '' }) {
   return (
     <span
       title={title}
       aria-label={`${title}: ${value}`}
-      className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 font-display text-[11px] font-black tabular-nums ring-1 max-md:gap-0.5 max-md:px-1 max-md:text-[10px] ${TONES[tone]} ${
-        lit ? 'animate-glow' : ''
-      }`}
+      className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 font-display text-[11px] font-black tabular-nums ring-1 max-md:gap-0.5 max-md:px-1 max-md:text-[10px] ${TONES[tone]} ${className}`}
     >
       <Glyph className="size-3.5 shrink-0 max-md:size-3" />
       {value}
+      {suffix}
+    </span>
+  );
+}
+
+/**
+ * Longest Road / Largest Army. These are the only two badges that come and go during a
+ * game, so they are a trophy in a laurel with a lit border while held - and simply absent
+ * otherwise, rather than a greyed-out slot nobody can read.
+ */
+function TrophyBadge({ icon: Glyph, label, value, tone }) {
+  const palette =
+    tone === 'crimson'
+      ? 'border-rose-300/80 bg-gradient-to-b from-rose-500/35 to-rose-900/60 text-rose-50 shadow-[0_0_14px_rgba(251,113,133,0.55)]'
+      : 'border-emerald-300/80 bg-gradient-to-b from-emerald-500/35 to-emerald-900/60 text-emerald-50 shadow-[0_0_14px_rgba(52,211,153,0.5)]';
+
+  return (
+    <span
+      title={`${label} (+2 VP)`}
+      aria-label={`${label}, +2 victory points`}
+      className={`animate-trophy-shine relative flex items-center gap-0.5 rounded-md border px-1 py-0.5 font-display text-[10px] font-black tabular-nums max-md:text-[9px] ${palette}`}
+    >
+      <LaurelIcon className="absolute inset-0 m-auto size-full opacity-30" />
+      <Glyph className="relative size-3 shrink-0" />
+      <span className="relative">{value}</span>
     </span>
   );
 }
@@ -55,13 +80,17 @@ function PlayerChip({
   negotiating,
   wishlist,
   tradeStatus,
+  isConnected,
 }) {
   const s = seat(player.color);
   const resourceCount =
     player.resourceCardCount ?? RESOURCES.reduce((sum, { key }) => sum + (player.resources?.[key] ?? 0), 0);
   const devCardCount =
     player.unplayedDevCardCount ?? (player.developmentCards ?? []).filter((c) => !c.isPlayed).length;
+  const playedDevCards = player.playedDevCardCount ?? 0;
   const atRiskOnSeven = resourceCount > 7;
+  // Bots never hold a socket, so "away" only means anything for a human seat.
+  const isAway = isConnected === false;
 
   return (
     // The outer item is only a positioning context: badges and the speech bubble must be
@@ -69,21 +98,32 @@ function PlayerChip({
     <li aria-current={isCurrentTurn ? 'true' : undefined} className="relative shrink-0">
       <div
         data-player-id={player.id}
-        className={`panel-glass pointer-events-auto relative flex items-center gap-2 overflow-hidden rounded-xl py-1 pl-3 pr-2 transition-all max-md:gap-1 max-md:rounded-lg max-md:py-0.5 max-md:pl-2 max-md:pr-1.5 ${
+        className={`panel-glass pointer-events-auto relative flex flex-col gap-1 overflow-hidden rounded-xl py-1.5 pl-3 pr-2 transition-all max-md:gap-0.5 max-md:rounded-lg max-md:py-1 max-md:pl-2 max-md:pr-1.5 ${
           isCurrentTurn
-            ? `ring-2 ${s.ring} shadow-[0_0_26px_rgba(245,190,90,0.3)]`
-            : 'opacity-80 hover:opacity-100'
+            ? `animate-turn-glow ring-2 ${s.ring}`
+            : isAway
+              ? 'opacity-55 saturate-50 hover:opacity-90'
+              : 'opacity-85 hover:opacity-100'
         }`}
       >
         {/* Heraldic colour band */}
         <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b ${s.gradient}`} />
+        {/* Active seat: a bright seam along the top of the card. */}
+        {isCurrentTurn && (
+          <span
+            aria-hidden="true"
+            className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-amber-200 to-transparent"
+          />
+        )}
 
-        <div className="flex min-w-0 items-center gap-1.5 max-md:gap-1">
+        {/* ---- Line 1: who, and what they hold ---- */}
+        <div className="flex items-center gap-1.5 max-md:gap-1">
           {isCurrentTurn ? (
             <CrownIcon className="size-3.5 shrink-0 text-amber-300 drop-shadow-[0_0_6px_rgba(245,190,90,0.8)] max-md:size-3" />
           ) : (
             <span className={`inline-block size-2.5 shrink-0 rounded-full ring-1 ring-black/40 ${s.dot}`} />
           )}
+
           <span
             className={`max-w-[7rem] truncate font-display text-xs font-bold tracking-wide max-md:max-w-[4.5rem] max-md:text-[10px] ${
               isMe ? 'text-amber-100' : 'text-parchment-50'
@@ -92,55 +132,72 @@ function PlayerChip({
           >
             {player.name}
           </span>
-        </div>
 
-        {/* Standing "wanted / for sale" notice, so the active player can see who to
-            approach without opening anything. */}
-        {wishlist && (wishlist.wants || wishlist.offers) && (
-          <span
-            className="animate-wish-pop flex shrink-0 items-center gap-px rounded-md bg-black/40 px-1 py-0.5 ring-1 ring-amber-700/50"
-            title={`Wants ${wishlist.wants ?? 'nothing'} - offers ${wishlist.offers ?? 'nothing'}`}
-            aria-label={`${player.name} wants ${wishlist.wants ?? 'nothing'} and offers ${wishlist.offers ?? 'nothing'}`}
-          >
-            {wishlist.wants && (
-              <span className="text-[11px] leading-none" aria-hidden="true">
-                {'↓'}
-                {RESOURCE_STYLE[wishlist.wants]?.glyph}
-              </span>
+          {isAway && (
+            <span
+              role="status"
+              title={`${player.name} has lost connection`}
+              aria-label={`${player.name} has lost connection`}
+              className="flex shrink-0 items-center text-rose-300"
+            >
+              <UnplugIcon className="size-3.5 animate-pulse max-md:size-3" />
+            </span>
+          )}
+
+          <span className="ml-auto flex shrink-0 items-center gap-1 max-md:gap-0.5">
+            {hasLargestArmy && (
+              <TrophyBadge
+                icon={KnightIcon}
+                label="Largest Army"
+                value={player.knightsPlayed ?? 0}
+                tone="crimson"
+              />
             )}
-            {wishlist.offers && (
-              <span className="text-[11px] leading-none" aria-hidden="true">
-                {'↑'}
-                {RESOURCE_STYLE[wishlist.offers]?.glyph}
+            {hasLongestRoad && (
+              <TrophyBadge
+                icon={RoadIcon}
+                label="Longest Road"
+                value={player.longestRoadLength ?? 0}
+                tone="emerald"
+              />
+            )}
+
+            {/* Standing "wanted / for sale" notice, so the active player can see who to
+                approach without opening anything. */}
+            {wishlist && (wishlist.wants || wishlist.offers) && (
+              <span
+                className="animate-wish-pop flex items-center gap-px rounded-md bg-black/40 px-1 py-0.5 ring-1 ring-amber-700/50"
+                title={`Wants ${wishlist.wants ?? 'nothing'} - offers ${wishlist.offers ?? 'nothing'}`}
+                aria-label={`${player.name} wants ${wishlist.wants ?? 'nothing'} and offers ${wishlist.offers ?? 'nothing'}`}
+              >
+                {wishlist.wants && (
+                  <span className="text-[11px] leading-none" aria-hidden="true">
+                    {'↓'}
+                    {RESOURCE_STYLE[wishlist.wants]?.glyph}
+                  </span>
+                )}
+                {wishlist.offers && (
+                  <span className="text-[11px] leading-none" aria-hidden="true">
+                    {'↑'}
+                    {RESOURCE_STYLE[wishlist.offers]?.glyph}
+                  </span>
+                )}
               </span>
             )}
           </span>
-        )}
+        </div>
 
+        {/* ---- Line 2: the scoreboard ---- */}
         <div className="flex items-center gap-1 max-md:gap-0.5">
           <Stat
-            icon={StarIcon}
+            icon={ShieldIcon}
             value={player.victoryPoints}
             title="Victory points"
             tone="gold"
-            lit={isCurrentTurn}
+            className={isCurrentTurn ? 'animate-glow' : ''}
           />
           <Stat
-            icon={KnightIcon}
-            value={player.knightsPlayed ?? 0}
-            title={hasLargestArmy ? 'Largest Army (+2 VP)' : 'Knights played'}
-            tone={hasLargestArmy ? 'crimson' : 'slate'}
-            lit={hasLargestArmy}
-          />
-          <Stat
-            icon={RoadIcon}
-            value={player.longestRoadLength ?? 0}
-            title={hasLongestRoad ? 'Longest Road (+2 VP)' : 'Longest road'}
-            tone={hasLongestRoad ? 'emerald' : 'slate'}
-            lit={hasLongestRoad}
-          />
-          <Stat
-            icon={CardsIcon}
+            icon={FaceDownCardsIcon}
             value={resourceCount}
             title={atRiskOnSeven ? 'Resource cards: discards on a 7' : 'Resource cards in hand'}
             tone={atRiskOnSeven ? 'danger' : 'slate'}
@@ -148,9 +205,32 @@ function PlayerChip({
           <Stat
             icon={DevCardIcon}
             value={devCardCount}
-            title="Unplayed development cards"
+            suffix={playedDevCards > 0 ? <span className="text-violet-300/70">/{playedDevCards}</span> : null}
+            title={
+              playedDevCards > 0
+                ? `Development cards: ${devCardCount} in hand, ${playedDevCards} played`
+                : 'Development cards in hand'
+            }
             tone="violet"
           />
+          {!hasLargestArmy && (
+            <Stat
+              icon={KnightIcon}
+              value={player.knightsPlayed ?? 0}
+              title="Knights played"
+              tone="slate"
+              className="max-md:hidden"
+            />
+          )}
+          {!hasLongestRoad && (
+            <Stat
+              icon={RoadIcon}
+              value={player.longestRoadLength ?? 0}
+              title="Longest road"
+              tone="slate"
+              className="max-md:hidden"
+            />
+          )}
         </div>
       </div>
 
@@ -191,7 +271,7 @@ function PlayerChip({
   );
 }
 
-/** Row of heraldic seat chips that floats over the top edge of the board. */
+/** Row of heraldic seat cards that floats over the top edge of the board. */
 export default function PlayerStatusBar({
   players,
   currentTurnPlayerId,
@@ -202,6 +282,7 @@ export default function PlayerStatusBar({
   negotiators = {},
   wishlists = {},
   tradeStatuses = {},
+  connections = {},
 }) {
   return (
     <ul
@@ -220,6 +301,7 @@ export default function PlayerStatusBar({
           negotiating={negotiators[player.id] ?? null}
           wishlist={wishlists[player.id] ?? null}
           tradeStatus={tradeStatuses[player.id] ?? null}
+          isConnected={connections[player.id]}
         />
       ))}
     </ul>
