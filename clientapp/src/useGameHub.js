@@ -71,7 +71,11 @@ export function useGameHub() {
   const [board, setBoard] = useState(null);
   const [game, setGame] = useState(null);
   const [lastRoll, setLastRoll] = useState(null);
+  // The last robbery: the server's RobberMoved plus a monotonic `id`. The id is what lets
+  // screens replay the theft - two steals of the same card off the same tile are otherwise
+  // indistinguishable, and the second would be swallowed as "nothing changed".
   const [lastRobbery, setLastRobbery] = useState(null);
+  const robberySeq = useRef(0);
   const [winner, setWinner] = useState(null);
   // Bumps every time the host restarts so screens can reset local UI (e.g. the log).
   const [restartCount, setRestartCount] = useState(0);
@@ -217,7 +221,7 @@ export function useGameHub() {
 
     connection.on(ROBBER_MOVED_EVENT, (robbery) => {
       if (!cancelled) {
-        setLastRobbery(robbery);
+        setLastRobbery({ ...robbery, id: ++robberySeq.current });
       }
     });
 

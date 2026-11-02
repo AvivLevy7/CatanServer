@@ -451,6 +451,22 @@ body,
   transform-style: preserve-3d;
 }
 
+/* A theft the viewer is only watching: the callout punches in, holds while the card
+   crosses the screen, then leaves. Shown to the victim and to onlookers alike, so a
+   robbery between two opponents is an event on everyone's screen and not just a log line.
+   The -translate-x-1/2 that centres the element has to be restated in every frame, or the
+   keyframe's transform would drop it and the callout would sit off to the right. */
+@keyframes steal-callout {
+  0% { opacity: 0; transform: translate(-50%, 14px) scale(0.86); }
+  12% { opacity: 1; transform: translate(-50%, 0) scale(1.06); }
+  20% { transform: translate(-50%, 0) scale(1); }
+  82% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -10px) scale(0.96); }
+}
+.animate-steal-callout {
+  animation: steal-callout 2.3s cubic-bezier(0.2, 1.1, 0.4, 1) both;
+}
+
 /* ---- 3. Emotes ---- */
 
 /* The wheel's buttons bloom outward from the launcher, one after another. */
@@ -535,6 +551,7 @@ body,
   .animate-discard-flash,
   .animate-steal-fan,
   .animate-steal-flip,
+  .animate-steal-callout,
   .animate-emote-bloom,
   .animate-bubble-pop,
   .animate-scales,
