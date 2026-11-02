@@ -32,13 +32,13 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         icons: [
-          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
-          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: 'pwa-192x192.jpg', sizes: '192x192', type: 'image/jpeg' },
+          { src: 'pwa-512x512.jpg', sizes: '512x512', type: 'image/jpeg' },
+          { src: 'pwa-512x512.jpg', sizes: '512x512', type: 'image/jpeg', purpose: 'any maskable' },
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,mp3,ogg,wav}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,jpg,ico,woff2,mp3,ogg,wav}'],
         // Never let the service worker intercept the live game connection.
         navigateFallbackDenylist: [/^\/hubs\//, /^\/api\//],
         runtimeCaching: [
