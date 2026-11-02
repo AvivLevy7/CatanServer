@@ -18,8 +18,17 @@ public sealed class AiBotService
     public static readonly TimeSpan ThinkDelay = TimeSpan.FromSeconds(1.5);
     public static readonly TimeSpan BuildDelay = TimeSpan.FromSeconds(0.9);
 
-    /// <summary>How long a bot leaves its own trade offer open for humans before withdrawing it.</summary>
+    /// <summary>
+    /// How long a bot leaves its own trade offer open when it is still waiting on an answer.
+    /// Counted from when the offer was posted, not from each time the bot looks at it.
+    /// </summary>
     public static readonly TimeSpan OfferWindow = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The beat a bot leaves between the last answer landing and closing its own deal. Short
+    /// enough to feel like a reaction, long enough that the table sees the last reply first.
+    /// </summary>
+    public static readonly TimeSpan SettleDelay = TimeSpan.FromSeconds(0.6);
 
     private sealed class Entry
     {
@@ -266,21 +275,28 @@ internal static class BotBrain
             return null;
         }
 
-        // 2. Someone is answering a trade (human- or bot-proposed) addressed to a bot.
+        // 2. Someone is answering a trade (human- or bot-proposed) addressed to a bot. A bot
+        // that has already said yes counts as answered: without that it was re-picked as a
+        // responder on every pass and re-accepted an offer it had accepted a second earlier,
+        // which also meant the branch below - the proposer closing its own deal - was never
+        // reached and the offer sat there until the server expired it.
         if (state.ActiveTradeOffer is { } offer)
         {
             var responder = room.Members
-                .Where(m => m.IsBot && m.Id != offer.SenderPlayerId && !offer.DeclinedBy.Contains(m.Id))
+                .Where(m => m.IsBot
+                            && m.Id != offer.SenderPlayerId
+                            && !offer.DeclinedBy.Contains(m.Id)
+                            && !offer.AcceptedBy.Contains(m.Id))
                 .FirstOrDefault(m => offer.TargetPlayerId is null || offer.TargetPlayerId == m.Id);
             if (responder is not null)
             {
                 return AnswerTrade(state, board, responder, offer, key);
             }
 
-            // A bot's own offer is still on the table waiting for humans: give them a moment, then withdraw.
+            // Every opponent that is going to answer has: the proposer closes its own deal.
             if (room.IsBot(offer.SenderPlayerId))
             {
-                return AwaitOwnOffer(room.FindById(offer.SenderPlayerId)!, offer, key);
+                return AwaitOwnOffer(room.FindById(offer.SenderPlayerId)!, state, offer, key);
             }
         }
 
@@ -651,13 +667,52 @@ internal static class BotBrain
     }
 
     /// <summary>
-    /// The bot's own offer is on the table. Since accepting only registers interest, a bot
-    /// proposer has to close its own deal: it waits a beat, then trades with whoever said yes
-    /// - skipping anyone near a win, under the same embargo it applies to its own trades - and
-    /// withdraws the offer if nobody did.
+    /// Recipients of <paramref name="offer"/> who have said neither yes nor no yet - the
+    /// players the proposer is still genuinely waiting on. A decline (or an embargo, which
+    /// records one) and an acceptance both count as answered.
     /// </summary>
-    private static BotPlan AwaitOwnOffer(RoomMember bot, TradeOfferDto offer, (GamePhase, Guid, bool, int) key) =>
-        new(bot.Name, "settle own trade", "settles its offer", AiBotService.OfferWindow, key, IsFallbackSafe: true, game =>
+    private static int PendingResponders(GameStateDto state, TradeOfferDto offer) =>
+        state.Players.Count(p =>
+            p.Id != offer.SenderPlayerId
+            && (offer.TargetPlayerId is null || offer.TargetPlayerId == p.Id)
+            && !offer.AcceptedBy.Contains(p.Id)
+            && !offer.DeclinedBy.Contains(p.Id));
+
+    /// <summary>
+    /// How much longer the proposer means to hold its offer open: once everybody has answered
+    /// there is nothing left to wait for, so it closes on the next beat.
+    ///
+    /// The window is anchored to the offer itself rather than measured afresh. Every answer
+    /// that lands wakes the bot loop and re-plans this move, so a plain "wait OfferWindow"
+    /// was restarted by each reply - which is why a bot whose offer everyone had already
+    /// answered still sat there until the server's own 15-second expiry fired.
+    /// </summary>
+    private static TimeSpan SettleIn(GameStateDto state, TradeOfferDto offer)
+    {
+        if (PendingResponders(state, offer) == 0)
+        {
+            return AiBotService.SettleDelay;
+        }
+
+        if (offer.ExpiresAt is not { } expiry)
+        {
+            return AiBotService.OfferWindow;
+        }
+
+        var elapsed = DateTimeOffset.UtcNow - (expiry - TradeRules.OfferLifetime);
+        var remaining = AiBotService.OfferWindow - elapsed;
+        return remaining > AiBotService.SettleDelay ? remaining : AiBotService.SettleDelay;
+    }
+
+    /// <summary>
+    /// The bot's own offer is on the table. Since accepting only registers interest, a bot
+    /// proposer has to close its own deal: it trades with whoever said yes - skipping anyone
+    /// near a win, under the same embargo it applies to its own trades - and withdraws the
+    /// offer if nobody did. It acts as soon as every opponent has answered, and otherwise
+    /// gives the undecided the rest of <see cref="AiBotService.OfferWindow"/>.
+    /// </summary>
+    private static BotPlan AwaitOwnOffer(RoomMember bot, GameStateDto state, TradeOfferDto offer, (GamePhase, Guid, bool, int) key) =>
+        new(bot.Name, "settle own trade", "settles its offer", SettleIn(state, offer), key, IsFallbackSafe: true, game =>
         {
             var current = game.GetGameState();
             if (current.ActiveTradeOffer?.OfferId != offer.OfferId)

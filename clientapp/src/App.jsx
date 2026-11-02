@@ -25,6 +25,7 @@ import PhaseBanner from './components/PhaseBanner';
 import PlayerStatusBar from './components/PlayerStatusBar';
 import SevenVignette from './components/SevenVignette';
 import StealPicker from './components/StealPicker';
+import StealReveal, { PIRATE_GLYPH } from './components/StealReveal';
 import BlindStealOverlay from './components/BlindStealOverlay';
 import TradeModal from './components/TradeModal';
 import { describeBundle } from './resources';
@@ -434,6 +435,31 @@ export default function App() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastTradeResult]);
+
+  // Robberies, as the thief's seat, the card and the victim. Pushed on every screen - the
+  // thief's included - so the feed agrees with the callout the rest of the table sees.
+  useEffect(() => {
+    if (!lastRobbery?.id || !lastRobbery.victimId) return;
+    miniLog.push({
+      playerId: lastRobbery.movedBy,
+      playerName: nameOf(lastRobbery.movedBy),
+      parts: (
+        <>
+          <span aria-hidden="true">{PIRATE_GLYPH}</span>
+          <span aria-hidden="true">
+            {lastRobbery.stolenResource
+              ? RESOURCE_STYLE[lastRobbery.stolenResource]?.glyph ?? '?'
+              : '\u{2014}'}
+          </span>
+          <ArrowRightIcon className="size-3.5 shrink-0 rotate-180 text-rose-300" />
+          <span className="truncate font-display text-[10px] font-bold">
+            {nameOf(lastRobbery.victimId)}
+          </span>
+        </>
+      ),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastRobbery?.id]);
 
   // Buildings going up, from the same diff that drives the placement animation.
   const lastImpact = useRef({ nodes: 0, edges: 0 });
@@ -1009,6 +1035,9 @@ export default function App() {
 
       {/* ---- Monopoly: every victim's cards drain into the caller's hand ---- */}
       <MonopolyDrain event={monopoly} myPlayerId={myPlayerId} onDone={clearMonopoly} />
+
+      {/* ---- A robbery, for everyone but the thief: the card leaves the victim's seat ---- */}
+      <StealReveal event={lastRobbery} players={players} myPlayerId={myPlayerId} />
 
       {/* ---- Emotes: a bubble over the sender's seat chip ---- */}
       <EmoteBubbleLayer emotes={emotes} />
